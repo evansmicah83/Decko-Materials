@@ -253,6 +253,61 @@ router.put('/:id', authenticateToken, requireRole(managementRoles), async (req: 
   return res.json({ success: true, message: 'Project updated successfully.', project: decorateProject(project) });
 });
 
+router.delete('/:id', authenticateToken, requireRole(managementRoles), async (req: AuthRequest, res: Response) => {
+  const projectId = req.params.id;
+  await db.exec('BEGIN');
+  try {
+    const project = await db.prepare('SELECT id, project_code, name FROM projects WHERE id = ? FOR UPDATE')
+      .get(projectId) as { id: string; project_code: string; name: string } | undefined;
+    if (!project) {
+      await db.exec('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Project not found.', code: 'PROJECT_NOT_FOUND' });
+    }
+
+    const dependencies = await db.prepare(`
+      SELECT
+        (SELECT count(*) FROM teams WHERE project_id = ?) as team_count,
+        (SELECT count(*) FROM user_projects WHERE project_id = ?) as staff_count,
+        (SELECT count(*) FROM material_requests WHERE project_id = ?) as request_count
+    `).get(projectId, projectId, projectId) as {
+      team_count: number;
+      staff_count: number;
+      request_count: number;
+    };
+    const links = [
+      Number(dependencies.team_count) > 0 && `${dependencies.team_count} field team(s)`,
+      Number(dependencies.staff_count) > 0 && `${dependencies.staff_count} staff assignment(s)`,
+      Number(dependencies.request_count) > 0 && `${dependencies.request_count} material request(s)`
+    ].filter((item): item is string => Boolean(item));
+
+    if (links.length) {
+      await db.exec('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: `Project ${project.project_code} cannot be deleted because it is linked to ${links.join(', ')}. Reassign active records or mark the project Completed to preserve its history.`,
+        code: 'PROJECT_HAS_LINKED_RECORDS'
+      });
+    }
+
+    await db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+    await logAuditEvent({
+      userId: req.user!.id,
+      action: 'PROJECT_DELETED',
+      entity: 'Project',
+      entityId: project.id,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      previousValue: { projectCode: project.project_code, name: project.name },
+      reason: `Project ${project.project_code} deleted by ${req.user!.fullName}`
+    });
+    await db.exec('COMMIT');
+    return res.json({ success: true, message: `Project ${project.project_code} deleted successfully.` });
+  } catch (error) {
+    await db.exec('ROLLBACK');
+    throw error;
+  }
+});
+
 // GET /api/v1/projects/:id/stats
 router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res: Response) => {
   const projectId = req.params.id;

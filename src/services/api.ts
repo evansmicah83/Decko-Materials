@@ -308,6 +308,9 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
+  deleteProject: (id: string) => request<{ success: boolean; message: string }>(`/projects/${id}`, {
+    method: 'DELETE'
+  }),
   getProjectStats: (projectId: string) => request<{ success: boolean; project: Project; statusBreakdown: any[]; topMaterials: any[] }>(`/projects/${projectId}/stats`),
 
   // Reports

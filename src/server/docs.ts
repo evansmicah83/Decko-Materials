@@ -16,6 +16,18 @@ export const openApiSpec = {
   },
   servers: [{ url: '/api/v1', description: 'Current Server Environment' }],
   paths: {
+    '/projects/{id}': {
+      delete: {
+        summary: 'Delete a client project when it has no teams, staff assignments, or request history',
+        tags: ['Projects'],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'Project deleted successfully' },
+          404: { description: 'Project not found' },
+          409: { description: 'Project still has linked records and cannot be deleted' }
+        }
+      }
+    },
     '/auth/login': {
       post: {
         summary: 'Authenticate employee with email and password',

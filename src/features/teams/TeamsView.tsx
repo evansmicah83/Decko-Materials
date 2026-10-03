@@ -36,6 +36,7 @@ export const TeamsView: React.FC = () => {
   const [teamTools, setTeamTools] = useState<any[]>([]);
   const [availableLeaders, setAvailableLeaders] = useState<any[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'members' | 'stock' | 'tools'>('members');
   const [managementTab, setManagementTab] = useState<'teams' | 'staff'>('teams');
@@ -106,17 +107,27 @@ export const TeamsView: React.FC = () => {
   }, [user]);
 
   const loadManagerData = async () => {
-    try {
-      const [leadersRes, projectsRes] = await Promise.all([
-        api.getAvailableLeaders(),
-        api.getProjects()
-      ]);
-      if (leadersRes.success) setAvailableLeaders(leadersRes.leaders);
-      if (projectsRes.success) setProjects(projectsRes.projects);
-    } catch (error) {
-      console.error('Failed to load team management data:', error);
-      showFeedback('error', error instanceof Error ? error.message : 'Unable to load projects and team leaders.');
+    const [leadersResult, projectsResult] = await Promise.allSettled([
+      api.getAvailableLeaders(),
+      api.getProjects()
+    ]);
+    const errors: string[] = [];
+
+    if (leadersResult.status === 'fulfilled') {
+      if (leadersResult.value.success) setAvailableLeaders(leadersResult.value.leaders);
+    } else {
+      console.error('Failed to load available field team leaders:', leadersResult.reason);
+      errors.push(leadersResult.reason instanceof Error ? leadersResult.reason.message : 'Unable to load team leaders.');
     }
+
+    if (projectsResult.status === 'fulfilled') {
+      if (projectsResult.value.success) setProjects(projectsResult.value.projects);
+    } else {
+      console.error('Failed to load client projects:', projectsResult.reason);
+      errors.push(projectsResult.reason instanceof Error ? projectsResult.reason.message : 'Unable to load projects.');
+    }
+
+    if (errors.length) showFeedback('error', errors.join(' '));
   };
 
   const loadTeams = async () => {
@@ -272,6 +283,7 @@ export const TeamsView: React.FC = () => {
         contractStartDate: newProjectStartDate,
         contractEndDate: newProjectEndDate
       };
+
       const result = isEditingProject
         ? await api.updateProject(editingProjectId, projectInput)
         : await api.createProject(projectInput);
@@ -300,6 +312,22 @@ export const TeamsView: React.FC = () => {
       showFeedback('error', error instanceof Error ? error.message : 'Failed to create project.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteProject = async (project: Project) => {
+    if (!confirm(`Delete project ${project.projectCode}? Projects with teams, staff assignments, or material request history cannot be deleted. To retain project history, edit its status to Completed instead.`)) return;
+    setDeletingProjectId(project.id);
+    try {
+      await api.deleteProject(project.id);
+      setProjects((current) => current.filter((item) => item.id !== project.id));
+      setAccountProjectIds((current) => current.filter((id) => id !== project.id));
+      setNewProjectId((current) => current === project.id ? '' : current);
+      showFeedback('success', `Project ${project.projectCode} deleted.`);
+    } catch (error) {
+      showFeedback('error', error instanceof Error ? error.message : 'Failed to delete project.');
+    } finally {
+      setDeletingProjectId(null);
     }
   };
 
@@ -665,14 +693,25 @@ export const TeamsView: React.FC = () => {
                         <h4 className="mt-1 truncate font-bold text-slate-900">{project.name}</h4>
                         <p className="mt-0.5 text-xs text-slate-500">{project.client} · {project.regionName || 'Region not set'}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openEditProject(project)}
-                        aria-label={`Edit ${project.projectCode}`}
-                        className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-[#04446F]"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex shrink-0 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openEditProject(project)}
+                          aria-label={`Edit ${project.projectCode}`}
+                          className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-[#04446F]"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteProject(project)}
+                          disabled={deletingProjectId !== null}
+                          aria-label={`Delete ${project.projectCode}`}
+                          className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
                       <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
@@ -1409,11 +1448,44 @@ export const TeamsView: React.FC = () => {
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
                           required
                         >
-                          <option value="">-- Select active client contract --</option>
-                          {activeContractProjects.map((project) => (
-                            <option key={project.id} value={project.id}>{project.client} · {project.projectCode} — {project.name}</option>
-                          ))}
+                          <option value="">-- Select an active client contract --</option>
+                          {projects.map((project) => {
+                            const isAvailable = activeContractProjects.some((activeProject) => activeProject.id === project.id);
+                            const availability = isAvailable
+                              ? ''
+                              : project.contractHealth === 'EXPIRED'
+                                ? ' — Contract expired'
+                                : project.contractHealth === 'NOT_STARTED'
+                                  ? ' — Contract not started'
+                                  : project.contractHealth === 'MISSING_DATES'
+                                    ? ' — Contract dates required'
+                                    : ` — ${project.status.replace('_', ' ').toLowerCase()}`;
+                            return (
+                              <option key={project.id} value={project.id} disabled={!isAvailable}>
+                                {project.client} · {project.projectCode} — {project.name}{availability}
+                              </option>
+                            );
+                          })}
                         </select>
+                        {projects.length === 0 ? (
+                          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                            <p>No client projects have been created yet. Create a project before assigning this employee.</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowCreateAccountModal(false);
+                                setManagementTab('teams');
+                              }}
+                              className="mt-2 rounded-md bg-[#04446F] px-3 py-1.5 font-bold text-white hover:bg-[#08558A]"
+                            >
+                              Go to Client Projects
+                            </button>
+                          </div>
+                        ) : activeContractProjects.length === 0 && (
+                          <p className="mt-1 text-xs text-amber-700">
+                            No project currently has an active contract. Update its status and contract dates in Client Projects &amp; Contracts.
+                          </p>
+                        )}
                       </div>
                       {accountProjectIds[0] && (
                         <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-[11px] text-sky-900">
