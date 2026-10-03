@@ -1,6 +1,6 @@
 import { MaterialRequest, Material, InventoryBalance, InventoryTransaction, TrackedUnit, Team, Project, Warehouse, AppNotification, AuditLogRecord } from '../types';
 
-const API_BASE = '/api/v1';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '');
 
 export function getStoredToken(): string | null {
   return localStorage.getItem('decko_token');

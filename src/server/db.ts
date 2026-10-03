@@ -3,12 +3,18 @@ import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const configuredDatabasePath = process.env.DATABASE_URL?.trim() || 'file:./data/decko_materials.db';
+const databasePath = configuredDatabasePath.startsWith('file:')
+  ? configuredDatabasePath.slice('file:'.length)
+  : configuredDatabasePath;
+const DB_PATH = path.isAbsolute(databasePath)
+  ? databasePath
+  : path.resolve(process.cwd(), databasePath);
+const DATA_DIR = path.dirname(DB_PATH);
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const DB_PATH = path.join(DATA_DIR, 'decko_materials.db');
 export const db = new DatabaseSync(DB_PATH);
 
 // Enable foreign keys and WAL mode for high performance & reliability

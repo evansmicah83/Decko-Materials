@@ -28,7 +28,19 @@ initDatabase();
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(cors());
+const allowedOrigins = process.env.WEB_ORIGIN
+  ?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || !allowedOrigins?.length || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Origin is not allowed by the API CORS policy.'));
+  }
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

@@ -110,6 +110,16 @@ npx cap sync android
 npx cap open android
 ```
 
+### Production deployment (Vercel frontend + persistent API)
+
+Vercel serves the Vite frontend; the Express API and SQLite database must run on a Node host with a persistent disk. `render.yaml` defines the API service and disk. Deploy it from the repository using Render Blueprint, then configure:
+
+1. In Render, set `SUPABASE_DATABASE_URL` to the Supabase PostgreSQL connection string from the project's **Connect** dialog. Keep it private. Render generates `JWT_SECRET` and `JWT_REFRESH_SECRET`; do not reuse local development values.
+2. Set Render's `WEB_ORIGIN` to the exact Vercel production URL (for example, `https://your-app.vercel.app`). Add any Vercel preview origins as comma-separated exact origins if previews need API access.
+3. In Vercel, set `VITE_API_BASE_URL` to the Render service URL followed by `/api/v1` (for example, `https://decko-materials-api.onrender.com/api/v1`), then redeploy. The Vercel project builds the static frontend using `vercel.json`.
+4. Confirm the Render service's `/api/health` endpoint returns `{"status":"healthy",...}` before testing sign-in. The API uses Supabase for user authentication and the Render persistent disk for operational SQLite data.
+5. Transfer any existing operational SQLite data to the mounted persistent disk before directing users to production. The disk starts empty; local `data/decko_materials.db` is deliberately excluded from Git and must not be committed.
+
 ---
 
 ## 7. Interactive API Documentation
