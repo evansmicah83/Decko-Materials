@@ -3,8 +3,9 @@ import { db } from './db.js';
 import { AuthRequest, authenticateToken, requireRole } from './auth.js';
 import { logAuditEvent } from './audit.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createAsyncRouter } from './asyncRouter.js';
 
-const router = Router();
+const router = createAsyncRouter();
 const managementRoles = ['SUPER_ADMIN', 'ADMIN', 'HR', 'PROJECT_MANAGER'];
 const projectStatuses = ['IN_PROGRESS', 'ACTIVE', 'ON_HOLD', 'COMPLETED'];
 
@@ -47,11 +48,11 @@ function validateProjectInput(input: Record<string, unknown>): string | null {
   return null;
 }
 
-function resolveRegionId(name: string): string {
-  const existing = db.prepare('SELECT id FROM regions WHERE LOWER(name) = LOWER(?)').get(name) as { id: string } | undefined;
+async function resolveRegionId(name: string): Promise<string> {
+  const existing = await db.prepare('SELECT id FROM regions WHERE LOWER(name) = LOWER(?)').get(name) as { id: string } | undefined;
   if (existing) return existing.id;
   const regionId = `reg-${uuidv4().slice(0, 8)}`;
-  db.prepare('INSERT INTO regions (id, name, code) VALUES (?, ?, ?)').run(
+  await db.prepare('INSERT INTO regions (id, name, code) VALUES (?, ?, ?)').run(
     regionId,
     name,
     `REG-${uuidv4().slice(0, 8).toUpperCase()}`
@@ -60,8 +61,8 @@ function resolveRegionId(name: string): string {
 }
 
 // GET /api/v1/projects
-router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
-  const projects = db.prepare(`
+router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const projects = await db.prepare(`
     SELECT p.id, p.project_code as projectCode, p.name, p.network_type as networkType, p.client,
            p.region_id as regionId, r.name as regionName,
            p.status, p.budget, p.contract_start_date as contractStartDate,
@@ -83,7 +84,7 @@ router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/v1/projects
-router.post('/', authenticateToken, requireRole(managementRoles), (req: AuthRequest, res: Response) => {
+router.post('/', authenticateToken, requireRole(managementRoles), async (req: AuthRequest, res: Response) => {
   const { projectCode, name, networkType, client, regionName, budget, status, contractStartDate, contractEndDate } = req.body;
   if (typeof projectCode !== 'string' || !projectCode.trim() ||
       typeof name !== 'string' || !name.trim() ||
@@ -108,16 +109,16 @@ router.post('/', authenticateToken, requireRole(managementRoles), (req: AuthRequ
   if (!Number.isFinite(cleanBudget) || cleanBudget < 0) {
     return res.status(400).json({ success: false, message: 'Project budget must be a non-negative number.', code: 'INVALID_PROJECT_BUDGET' });
   }
-  if (db.prepare('SELECT id FROM projects WHERE UPPER(project_code) = ?').get(cleanCode)) {
+  if (await db.prepare('SELECT id FROM projects WHERE UPPER(project_code) = ?').get(cleanCode)) {
     return res.status(409).json({ success: false, message: `Project code ${cleanCode} is already in use.`, code: 'PROJECT_CODE_EXISTS' });
   }
 
   const projectId = `prj-${uuidv4().slice(0, 8)}`;
   const now = new Date().toISOString();
-  db.exec('BEGIN');
+  await db.exec('BEGIN');
   try {
-    const regionId = resolveRegionId(regionName.trim());
-    db.prepare(`
+    const regionId = await resolveRegionId(regionName.trim());
+    await db.prepare(`
       INSERT INTO projects (id, project_code, name, network_type, client, region_id, status, budget, contract_start_date, contract_end_date, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -134,13 +135,13 @@ router.post('/', authenticateToken, requireRole(managementRoles), (req: AuthRequ
       now,
       now
     );
-    db.exec('COMMIT');
+    await db.exec('COMMIT');
   } catch (error) {
-    db.exec('ROLLBACK');
+    await db.exec('ROLLBACK');
     throw error;
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     userId: req.user!.id,
     action: 'PROJECT_CREATED',
     entity: 'Project',
@@ -151,7 +152,7 @@ router.post('/', authenticateToken, requireRole(managementRoles), (req: AuthRequ
     reason: `Project ${cleanCode} created by ${req.user!.fullName}`
   });
 
-  const project = db.prepare(`
+  const project = await db.prepare(`
     SELECT p.id, p.project_code as projectCode, p.name, p.network_type as networkType,
            p.client, p.region_id as regionId, r.name as regionName, p.status, p.budget,
            p.contract_start_date as contractStartDate, p.contract_end_date as contractEndDate,
@@ -168,10 +169,10 @@ router.post('/', authenticateToken, requireRole(managementRoles), (req: AuthRequ
   return res.status(201).json({ success: true, message: 'Project created successfully.', project: decorateProject(project) });
 });
 
-router.put('/:id', authenticateToken, requireRole(managementRoles), (req: AuthRequest, res: Response) => {
+router.put('/:id', authenticateToken, requireRole(managementRoles), async (req: AuthRequest, res: Response) => {
   const projectId = req.params.id;
   const { projectCode, name, networkType, client, regionName, budget, status, contractStartDate, contractEndDate } = req.body;
-  const current = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  const current = await db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
   if (!current) return res.status(404).json({ success: false, message: 'Project not found.' });
   if (typeof projectCode !== 'string' || !projectCode.trim() ||
       typeof name !== 'string' || !name.trim() ||
@@ -190,10 +191,10 @@ router.put('/:id', authenticateToken, requireRole(managementRoles), (req: AuthRe
   if (!Number.isFinite(cleanBudget) || cleanBudget < 0) {
     return res.status(400).json({ success: false, message: 'Project budget must be a non-negative number.' });
   }
-  const duplicate = db.prepare('SELECT id FROM projects WHERE UPPER(project_code) = ? AND id <> ?').get(cleanCode, projectId);
+  const duplicate = await db.prepare('SELECT id FROM projects WHERE UPPER(project_code) = ? AND id <> ?').get(cleanCode, projectId);
   if (duplicate) return res.status(409).json({ success: false, message: `Project code ${cleanCode} is already in use.` });
 
-  const incompatibleTeam = db.prepare(`
+  const incompatibleTeam = await db.prepare(`
     SELECT team_code FROM teams
     WHERE project_id = ? AND UPPER(team_code) NOT LIKE ?
     LIMIT 1
@@ -207,10 +208,10 @@ router.put('/:id', authenticateToken, requireRole(managementRoles), (req: AuthRe
   }
 
   const now = new Date().toISOString();
-  db.exec('BEGIN');
+  await db.exec('BEGIN');
   try {
-    const regionId = resolveRegionId(regionName.trim());
-    db.prepare(`
+    const regionId = await resolveRegionId(regionName.trim());
+    await db.prepare(`
       UPDATE projects
       SET project_code = ?, name = ?, network_type = ?, client = ?, region_id = ?, status = ?, budget = ?,
           contract_start_date = ?, contract_end_date = ?, updated_at = ?
@@ -219,13 +220,13 @@ router.put('/:id', authenticateToken, requireRole(managementRoles), (req: AuthRe
       cleanCode, name.trim(), cleanNetworkType, client.trim(), regionId, status,
       cleanBudget, contractStartDate, contractEndDate, now, projectId
     );
-    db.exec('COMMIT');
+    await db.exec('COMMIT');
   } catch (error) {
-    db.exec('ROLLBACK');
+    await db.exec('ROLLBACK');
     throw error;
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     userId: req.user!.id,
     action: 'PROJECT_UPDATED',
     entity: 'Project',
@@ -236,7 +237,7 @@ router.put('/:id', authenticateToken, requireRole(managementRoles), (req: AuthRe
     newValue: { projectCode: cleanCode, status, contractEndDate },
     reason: `Project ${cleanCode} updated by ${req.user!.fullName}`
   });
-  const project = db.prepare(`
+  const project = await db.prepare(`
     SELECT p.id, p.project_code as projectCode, p.name, p.network_type as networkType,
            p.client, p.region_id as regionId, r.name as regionName, p.status, p.budget,
            p.contract_start_date as contractStartDate, p.contract_end_date as contractEndDate,
@@ -253,10 +254,10 @@ router.put('/:id', authenticateToken, requireRole(managementRoles), (req: AuthRe
 });
 
 // GET /api/v1/projects/:id/stats
-router.get('/:id/stats', authenticateToken, (req: AuthRequest, res: Response) => {
+router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res: Response) => {
   const projectId = req.params.id;
 
-  const project = db.prepare(`
+  const project = await db.prepare(`
     SELECT id, project_code as projectCode, name, network_type as networkType, client,
            region_id as regionId, status, budget, contract_start_date as contractStartDate,
            contract_end_date as contractEndDate, created_at as createdAt, updated_at as updatedAt
@@ -266,7 +267,7 @@ router.get('/:id/stats', authenticateToken, (req: AuthRequest, res: Response) =>
   if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
 
   // Material requests breakdown
-  const statusBreakdown = db.prepare(`
+  const statusBreakdown = await db.prepare(`
     SELECT status, count(*) as count, sum(estimated_cost) as totalCost
     FROM material_requests
     WHERE project_id = ?
@@ -274,7 +275,7 @@ router.get('/:id/stats', authenticateToken, (req: AuthRequest, res: Response) =>
   `).all(projectId);
 
   // Top consumed materials on this project
-  const topMaterials = db.prepare(`
+  const topMaterials = await db.prepare(`
     SELECT m.name as materialName, m.unit, sum(mii.quantity_issued) as totalQuantityIssued
     FROM material_issue_items mii
     JOIN material_issues mi ON mii.issue_id = mi.id

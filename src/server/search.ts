@@ -1,11 +1,12 @@
 import { Router, Response } from 'express';
 import { db } from './db.js';
 import { AuthRequest, authenticateToken } from './auth.js';
+import { createAsyncRouter } from './asyncRouter.js';
 
-const router = Router();
+const router = createAsyncRouter();
 
 // GET /api/v1/search?q=query
-router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
+router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const query = (req.query.q as string || '').trim();
   if (!query || query.length < 2) {
     return res.json({ success: true, results: { requests: [], materials: [], serials: [], teams: [] } });
@@ -14,7 +15,7 @@ router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
   const q = `%${query}%`;
 
   // Search Requests
-  const requests = db.prepare(`
+  const requests = await db.prepare(`
     SELECT mr.id, mr.request_number as requestNumber, t.team_code as teamCode,
            mr.status, mr.reason, mr.created_at as createdAt, 'request' as type
     FROM material_requests mr
@@ -24,7 +25,7 @@ router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
   `).all(q, q, q);
 
   // Search Materials
-  const materials = db.prepare(`
+  const materials = await db.prepare(`
     SELECT id, sku, name, current_stock as currentStock, unit, 'material' as type
     FROM materials
     WHERE sku LIKE ? OR name LIKE ?
@@ -32,7 +33,7 @@ router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
   `).all(q, q);
 
   // Search Serials / Tracked Units
-  const serials = db.prepare(`
+  const serials = await db.prepare(`
     SELECT tu.id, tu.serial_number as serialNumber, tu.status, m.name as materialName, 'serial' as type
     FROM tracked_units tu
     JOIN materials m ON tu.material_id = m.id
@@ -41,7 +42,7 @@ router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
   `).all(q, q, q);
 
   // Search Teams
-  const teams = db.prepare(`
+  const teams = await db.prepare(`
     SELECT id, team_code as teamCode, name, assigned_area as assignedArea, 'team' as type
     FROM teams
     WHERE team_code LIKE ? OR name LIKE ? OR assigned_area LIKE ?

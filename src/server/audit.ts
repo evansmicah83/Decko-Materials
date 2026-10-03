@@ -13,14 +13,14 @@ export interface AuditParams {
   reason?: string | null;
 }
 
-export function logAuditEvent(params: AuditParams) {
+export async function logAuditEvent(params: AuditParams) {
   try {
     const id = `aud-${uuidv4().slice(0, 8)}`;
     const now = new Date().toISOString();
     const prevStr = params.previousValue !== undefined ? (typeof params.previousValue === 'string' ? params.previousValue : JSON.stringify(params.previousValue)) : null;
     const newStr = params.newValue !== undefined ? (typeof params.newValue === 'string' ? params.newValue : JSON.stringify(params.newValue)) : null;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO audit_logs (id, user_id, action, entity, entity_id, ip_address, user_agent, previous_value, new_value, reason, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(

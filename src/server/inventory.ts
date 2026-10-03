@@ -3,11 +3,12 @@ import { db } from './db.js';
 import { AuthRequest, authenticateToken, requireRole } from './auth.js';
 import { logAuditEvent } from './audit.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createAsyncRouter } from './asyncRouter.js';
 
-const router = Router();
+const router = createAsyncRouter();
 
 // GET /api/v1/inventory or /api/v1/inventory/balances
-router.get(['/', '/balances'], authenticateToken, (req: AuthRequest, res: Response) => {
+router.get(['/', '/balances'], authenticateToken, async (req: AuthRequest, res: Response) => {
   if (req.user?.role === 'FIELD_TECHNICIAN') {
     return res.status(403).json({ success: false, message: 'Technicians can view their assigned team stock from Teams & Stock.', code: 'INSUFFICIENT_PERMISSIONS' });
   }
@@ -36,13 +37,13 @@ router.get(['/', '/balances'], authenticateToken, (req: AuthRequest, res: Respon
   }
 
   query += ' ORDER BY m.name ASC';
-  const balances = db.prepare(query).all(...params);
+  const balances = await db.prepare(query).all(...params);
 
   return res.json({ success: true, count: balances.length, balances });
 });
 
-router.get('/warehouses', authenticateToken, (req: AuthRequest, res: Response) => {
-  const warehouses = db.prepare(`
+router.get('/warehouses', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const warehouses = await db.prepare(`
     SELECT id, code, name, location, manager
     FROM warehouses
     ORDER BY name ASC
@@ -50,7 +51,7 @@ router.get('/warehouses', authenticateToken, (req: AuthRequest, res: Response) =
   return res.json({ success: true, count: warehouses.length, warehouses });
 });
 
-router.post('/warehouses', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER']), (req: AuthRequest, res: Response) => {
+router.post('/warehouses', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER']), async (req: AuthRequest, res: Response) => {
   const { code, name, location, manager } = req.body;
   if (typeof code !== 'string' || !code.trim() ||
       typeof name !== 'string' || !name.trim() ||
@@ -59,14 +60,14 @@ router.post('/warehouses', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN
   }
 
   const cleanCode = code.trim().toUpperCase();
-  if (db.prepare('SELECT id FROM warehouses WHERE UPPER(code) = ?').get(cleanCode)) {
+  if (await db.prepare('SELECT id FROM warehouses WHERE UPPER(code) = ?').get(cleanCode)) {
     return res.status(409).json({ success: false, message: `Warehouse code ${cleanCode} is already in use.` });
   }
 
   const id = `wh-${uuidv4().slice(0, 8)}`;
-  db.prepare('INSERT INTO warehouses (id, code, name, location, manager) VALUES (?, ?, ?, ?, ?)')
+  await db.prepare('INSERT INTO warehouses (id, code, name, location, manager) VALUES (?, ?, ?, ?, ?)')
     .run(id, cleanCode, name.trim(), location.trim(), typeof manager === 'string' && manager.trim() ? manager.trim() : null);
-  logAuditEvent({
+  await logAuditEvent({
     userId: req.user?.id,
     action: 'WAREHOUSE_CREATED',
     entity: 'Warehouse',
@@ -75,12 +76,12 @@ router.post('/warehouses', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN
     newValue: { code: cleanCode, name: name.trim(), location: location.trim() },
     reason: `Warehouse ${cleanCode} created`
   });
-  const warehouse = db.prepare('SELECT id, code, name, location, manager FROM warehouses WHERE id = ?').get(id);
+  const warehouse = await db.prepare('SELECT id, code, name, location, manager FROM warehouses WHERE id = ?').get(id);
   return res.status(201).json({ success: true, message: 'Warehouse created successfully.', warehouse });
 });
 
 // GET /api/v1/inventory/transactions (Ledger)
-router.get('/transactions', authenticateToken, (req: AuthRequest, res: Response) => {
+router.get('/transactions', authenticateToken, async (req: AuthRequest, res: Response) => {
   if (req.user?.role === 'FIELD_TECHNICIAN') {
     return res.status(403).json({ success: false, message: 'Warehouse inventory transactions are restricted to authorized operations staff.', code: 'INSUFFICIENT_PERMISSIONS' });
   }
@@ -118,19 +119,19 @@ router.get('/transactions', authenticateToken, (req: AuthRequest, res: Response)
   query += ' ORDER BY it.created_at DESC LIMIT ?';
   params.push(Number(limit) || 100);
 
-  const transactions = db.prepare(query).all(...params);
+  const transactions = await db.prepare(query).all(...params);
   return res.json({ success: true, count: transactions.length, transactions });
 });
 
 // POST /api/v1/inventory/adjust (Stock Adjustment)
-router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER']), (req: AuthRequest, res: Response) => {
+router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER']), async (req: AuthRequest, res: Response) => {
   const { materialId, warehouseId, type, quantity, reason, reference } = req.body;
 
   if (!materialId || !type || quantity === undefined) {
     return res.status(400).json({ success: false, message: 'materialId, type, and quantity are required' });
   }
 
-  const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(materialId) as any;
+  const material = await db.prepare('SELECT * FROM materials WHERE id = ?').get(materialId) as any;
   if (!material) {
     return res.status(404).json({ success: false, message: 'Material not found' });
   }
@@ -144,7 +145,7 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
   if (!targetWh) {
     return res.status(400).json({ success: false, message: 'Select a warehouse for this inventory adjustment.', code: 'WAREHOUSE_REQUIRED' });
   }
-  if (!db.prepare('SELECT id FROM warehouses WHERE id = ?').get(targetWh)) {
+  if (!await db.prepare('SELECT id FROM warehouses WHERE id = ?').get(targetWh)) {
     return res.status(400).json({ success: false, message: 'Selected warehouse does not exist.', code: 'INVALID_WAREHOUSE' });
   }
   const prevStock = Number(material.current_stock);
@@ -167,21 +168,21 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
   const txId = `tx-${uuidv4().slice(0, 8)}`;
 
   // Atomic database update
-  db.exec('BEGIN TRANSACTION');
+  await db.exec('BEGIN TRANSACTION');
   try {
-    db.prepare('UPDATE materials SET current_stock = ?, updated_at = ? WHERE id = ?').run(newStock, now, materialId);
+    await db.prepare('UPDATE materials SET current_stock = ?, updated_at = ? WHERE id = ?').run(newStock, now, materialId);
     
     // Update or insert warehouse balance
-    const existingBal = db.prepare('SELECT id, quantity FROM inventory_balances WHERE warehouse_id = ? AND material_id = ?').get(targetWh, materialId) as any;
+    const existingBal = await db.prepare('SELECT id, quantity FROM inventory_balances WHERE warehouse_id = ? AND material_id = ?').get(targetWh, materialId) as any;
     if (existingBal) {
       const whNew = ['RECEIPT', 'PURCHASE', 'RETURN'].includes(type) ? Number(existingBal.quantity) + numQty : Math.max(0, Number(existingBal.quantity) - numQty);
-      db.prepare('UPDATE inventory_balances SET quantity = ?, updated_at = ? WHERE id = ?').run(whNew, now, existingBal.id);
+      await db.prepare('UPDATE inventory_balances SET quantity = ?, updated_at = ? WHERE id = ?').run(whNew, now, existingBal.id);
     } else {
-      db.prepare('INSERT INTO inventory_balances (id, warehouse_id, material_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?)')
+      await db.prepare('INSERT INTO inventory_balances (id, warehouse_id, material_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?)')
         .run(`bal-${uuidv4().slice(0, 8)}`, targetWh, materialId, newStock, now);
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO inventory_transactions (id, material_id, type, quantity, previous_stock, new_stock, source, destination, reference, reason, user_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -190,13 +191,13 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
       req.user?.id ?? null, now
     );
 
-    db.exec('COMMIT');
+    await db.exec('COMMIT');
   } catch (err: any) {
-    db.exec('ROLLBACK');
+    await db.exec('ROLLBACK');
     return res.status(500).json({ success: false, message: 'Adjustment transaction failed: ' + err.message });
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     userId: req.user?.id,
     action: 'STOCK_ADJUSTED',
     entity: 'Inventory',
@@ -216,7 +217,7 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
 });
 
 // GET /api/v1/inventory/tracked-units (Serial number controlled tools & Safaricom devices)
-router.get('/tracked-units', authenticateToken, (req: AuthRequest, res: Response) => {
+router.get('/tracked-units', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { materialId, status, search } = req.query;
 
   let query = `
@@ -246,16 +247,16 @@ router.get('/tracked-units', authenticateToken, (req: AuthRequest, res: Response
   }
 
   query += ' ORDER BY tu.updated_at DESC';
-  const units = db.prepare(query).all(...params);
+  const units = await db.prepare(query).all(...params);
 
   return res.json({ success: true, count: units.length, units });
 });
 
 // GET /api/v1/inventory/chain-of-custody/:serial (Complete serial timeline history)
-router.get('/chain-of-custody/:serial', authenticateToken, (req: AuthRequest, res: Response) => {
+router.get('/chain-of-custody/:serial', authenticateToken, async (req: AuthRequest, res: Response) => {
   const serial = req.params.serial.trim();
 
-  const unit = db.prepare(`
+  const unit = await db.prepare(`
     SELECT tu.*, m.name as materialName, m.sku, m.category, m.requires_safaricom_tracking as requiresSafaricomTracking,
            t.team_code as teamCode, t.name as teamName
     FROM tracked_units tu
@@ -273,7 +274,7 @@ router.get('/chain-of-custody/:serial', authenticateToken, (req: AuthRequest, re
   }
 
   // Find all issues where this serial was included
-  const issues = db.prepare(`
+  const issues = await db.prepare(`
     SELECT mi.id, mi.request_id as requestId, mr.request_number as requestNumber,
            t.team_code as teamCode, t.name as teamName, p.name as projectName,
            mi.recipient_name as recipientName, u.full_name as storeOfficerName,
@@ -289,7 +290,7 @@ router.get('/chain-of-custody/:serial', authenticateToken, (req: AuthRequest, re
   `).all(unit.serial_number, unit.id);
 
   // Find all returns where this serial was returned
-  const returns = db.prepare(`
+  const returns = await db.prepare(`
     SELECT mr.id, mr.request_id as requestId, req.request_number as requestNumber,
            t.team_code as teamCode, t.name as teamName,
            u.full_name as receiverName, mri.condition, mri.notes,

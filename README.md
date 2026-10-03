@@ -30,7 +30,7 @@ FIELD TEAM
 
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide React, Canvas Confetti, HTML5 QR/Barcode Scanner, jsPDF.
 - **Backend**: Node.js 22, Express.js, TypeScript, JWT authentication, bcrypt password hashing.
-- **Database**: Supabase PostgreSQL is used for authentication and account profiles; most operational API features currently use the local SQLite database. The two stores are mirrored for provisioned accounts, so this is not yet a full operational-data migration to Supabase.
+- **Database**: Supabase PostgreSQL stores authentication, user profiles, teams, projects, inventory, requests, approvals, notifications, and audit history.
 - **Mobile Packaging**: Capacitor (`capacitor.config.ts`, Package ID `ke.decko.materials`) for Android APK deployment.
 - **Documentation**: OpenAPI / Swagger interactive documentation available at `/api/docs`.
 
@@ -81,8 +81,8 @@ Teams and staff cannot be assigned to a project unless its status is active/in p
 # Install dependencies
 npm install
 
-# Copy .env.example to .env and set unique, private values for JWT_SECRET,
-# JWT_REFRESH_SECRET, and SUPABASE_DATABASE_URL before starting the server.
+# Copy .env.example to .env and set private values for SUPABASE_DATABASE_URL,
+# JWT_SECRET, and JWT_REFRESH_SECRET before starting the server.
 
 # Start full-stack development server (Express backend + Vite frontend)
 npm run dev
@@ -93,7 +93,7 @@ npm run lint
 # Production build
 npm run build
 
-# Start production server
+# Start the full-stack server locally
 npm start
 ```
 
@@ -110,15 +110,18 @@ npx cap sync android
 npx cap open android
 ```
 
-### Production deployment (Vercel frontend + persistent API)
+### Production deployment (Vercel + Supabase)
 
-Vercel serves the Vite frontend; the Express API and SQLite database must run on a Node host with a persistent disk. `render.yaml` defines the API service and disk. Deploy it from the repository using Render Blueprint, then configure:
+Vercel serves both the Vite application and the Express API as a serverless function. Supabase PostgreSQL is the only production database; the API does not rely on a Vercel filesystem or SQLite persistence.
 
-1. In Render, set `SUPABASE_DATABASE_URL` to the Supabase PostgreSQL connection string from the project's **Connect** dialog. Keep it private. Render generates `JWT_SECRET` and `JWT_REFRESH_SECRET`; do not reuse local development values.
-2. Set Render's `WEB_ORIGIN` to the exact Vercel production URL (for example, `https://your-app.vercel.app`). Add any Vercel preview origins as comma-separated exact origins if previews need API access.
-3. In Vercel, set `VITE_API_BASE_URL` to the Render service URL followed by `/api/v1` (for example, `https://decko-materials-api.onrender.com/api/v1`), then redeploy. The Vercel project builds the static frontend using `vercel.json`.
-4. Confirm the Render service's `/api/health` endpoint returns `{"status":"healthy",...}` before testing sign-in. The API uses Supabase for user authentication and the Render persistent disk for operational SQLite data.
-5. Transfer any existing operational SQLite data to the mounted persistent disk before directing users to production. The disk starts empty; local `data/decko_materials.db` is deliberately excluded from Git and must not be committed.
+1. Apply `supabase/migrations/20261003210000_operational_schema.sql` in the Supabase SQL Editor if the operational schema has not already been applied. The migration uses `IF NOT EXISTS` so it can safely fill the project schema gaps.
+2. In the Vercel project's **Settings → Environment Variables**, add the following as **server-side secrets** for Production and Preview:
+   - `SUPABASE_DATABASE_URL`: the Supabase PostgreSQL connection string. Use the pooler URL for serverless workloads and keep the password private.
+   - `JWT_SECRET` and `JWT_REFRESH_SECRET`: separate random secrets, each at least 32 characters long.
+3. `VITE_API_BASE_URL` is optional. The frontend defaults to the same-origin `/api/v1` endpoint; if set, use `/api/v1`. Never put a database URL or JWT secret in a `VITE_*` variable.
+4. Push the project to the connected GitHub branch or redeploy from Vercel. Check `/api/health` and `/api/docs` on the deployed domain, then test sign-in with an active organization account.
+
+For local development, configure the same three database/JWT values in `.env`. The app uses the configured Supabase database for local API traffic too. Never commit `.env` or expose server-only credentials in frontend environment variables.
 
 ---
 

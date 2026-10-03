@@ -4,7 +4,8 @@ const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
 const API_BASE = (configuredApiBase || '/api/v1').replace(/\/+$/, '');
 const apiBaseIsValidForProduction = (() => {
   if (!import.meta.env.PROD) return true;
-  if (!configuredApiBase) return false;
+  if (!configuredApiBase) return true;
+  if (configuredApiBase.startsWith('/api/v1') && !configuredApiBase.startsWith('//')) return true;
   try {
     const apiUrl = new URL(configuredApiBase);
     return apiUrl.protocol === 'https:' && apiUrl.pathname.replace(/\/+$/, '').endsWith('/api/v1');
@@ -27,7 +28,7 @@ export function setStoredToken(token: string | null) {
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   if (!apiBaseIsValidForProduction) {
-    throw new Error('The API is not configured for this production deployment. Set VITE_API_BASE_URL in Vercel to your HTTPS backend URL ending in /api/v1, then redeploy.');
+    throw new Error('The API URL is invalid. Use the same-origin /api/v1 route or an HTTPS backend URL ending in /api/v1.');
   }
 
   const token = getStoredToken();
@@ -53,7 +54,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.toLowerCase().includes('application/json')) {
-    throw new Error(`The API returned a non-JSON response (HTTP ${res.status}). Check that VITE_API_BASE_URL points to the Express backend, not the Vercel frontend.`);
+    throw new Error(`The API returned a non-JSON response (HTTP ${res.status}). Check that the Vercel API function is deployed.`);
   }
 
   const data = await res.json();

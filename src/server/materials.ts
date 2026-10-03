@@ -3,11 +3,12 @@ import { db } from './db.js';
 import { AuthRequest, authenticateToken, requireRole } from './auth.js';
 import { logAuditEvent } from './audit.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createAsyncRouter } from './asyncRouter.js';
 
-const router = Router();
+const router = createAsyncRouter();
 
 // GET /api/v1/materials
-router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
+router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { category, search, activeOnly, lowStockOnly } = req.query;
 
   let query = `
@@ -38,7 +39,7 @@ router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
   }
 
   query += ' ORDER BY name ASC';
-  const materials = db.prepare(query).all(...params);
+  const materials = await db.prepare(query).all(...params);
 
   return res.json({ success: true, count: materials.length, materials });
 });
@@ -62,8 +63,8 @@ router.get('/categories', authenticateToken, (req: AuthRequest, res: Response) =
 });
 
 // GET /api/v1/materials/:id
-router.get('/:id', authenticateToken, (req: AuthRequest, res: Response) => {
-  const material = db.prepare(`
+router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const material = await db.prepare(`
     SELECT id, sku, name, category, description, unit, current_stock as currentStock,
            minimum_stock as minimumStock, reorder_level as reorderLevel, maximum_stock as maximumStock,
            store_location as storeLocation, is_serial_required as isSerialRequired,
@@ -78,7 +79,7 @@ router.get('/:id', authenticateToken, (req: AuthRequest, res: Response) => {
     return res.status(404).json({ success: false, message: 'Material not found' });
   }
 
-  const trackedUnits = db.prepare(`
+  const trackedUnits = await db.prepare(`
     SELECT id, serial_number as serialNumber, barcode, status, current_location as currentLocation,
            current_team_id as currentTeamId, custodian_name as custodianName, safaricom_tag as safaricomTag
     FROM tracked_units
@@ -90,7 +91,7 @@ router.get('/:id', authenticateToken, (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/v1/materials (Create material - admin/store/procurement)
-router.post('/', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER', 'PROCUREMENT_OFFICER']), (req: AuthRequest, res: Response) => {
+router.post('/', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER', 'PROCUREMENT_OFFICER']), async (req: AuthRequest, res: Response) => {
   const {
     sku, name, category, description, unit, minimumStock, reorderLevel, maximumStock,
     storeLocation, isSerialRequired, isBarcodeRequired, isScanningMandatory,
@@ -101,7 +102,7 @@ router.post('/', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_
     return res.status(400).json({ success: false, message: 'SKU, name, and category are required' });
   }
 
-  const existing = db.prepare('SELECT id FROM materials WHERE sku = ?').get(sku);
+  const existing = await db.prepare('SELECT id FROM materials WHERE sku = ?').get(sku);
   if (existing) {
     return res.status(400).json({ success: false, message: 'Material with this SKU already exists' });
   }
@@ -113,7 +114,7 @@ router.post('/', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_
     return res.status(400).json({ success: false, message: 'Initial stock must be a non-negative number.' });
   }
   const initialWarehouse = stock > 0 && typeof warehouseId === 'string'
-    ? db.prepare('SELECT id, name FROM warehouses WHERE id = ?').get(warehouseId) as { id: string; name: string } | undefined
+    ? await db.prepare('SELECT id, name FROM warehouses WHERE id = ?').get(warehouseId) as { id: string; name: string } | undefined
     : undefined;
   if (stock > 0 && !initialWarehouse) {
     return res.status(400).json({
@@ -123,7 +124,7 @@ router.post('/', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_
     });
   }
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO materials (
       id, sku, name, category, description, unit, current_stock, minimum_stock, reorder_level, maximum_stock,
       store_location, is_serial_required, is_barcode_required, is_scanning_mandatory, requires_safaricom_tracking,
@@ -138,16 +139,16 @@ router.post('/', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'STORE_
   );
 
   if (stock > 0) {
-    db.prepare('INSERT INTO inventory_balances (id, warehouse_id, material_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?)')
+    await db.prepare('INSERT INTO inventory_balances (id, warehouse_id, material_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(`bal-${id}`, initialWarehouse!.id, id, stock, now);
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO inventory_transactions (id, material_id, type, quantity, previous_stock, new_stock, source, destination, reference, reason, user_id, created_at)
       VALUES (?, ?, 'RECEIPT', ?, 0, ?, 'Initial Setup', ?, 'INIT-ITEM', 'Initial Stock Setup', ?, ?)
     `).run(`tx-${uuidv4().slice(0, 8)}`, id, stock, stock, initialWarehouse!.name, req.user?.id ?? null, now);
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     userId: req.user?.id,
     action: 'MATERIAL_CREATED',
     entity: 'Material',

@@ -3,10 +3,10 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from './db.js';
-import { supabase } from './supabase.js';
 import { logAuditEvent } from './audit.js';
+import { createAsyncRouter } from './asyncRouter.js';
 
-const router = Router();
+const router = createAsyncRouter();
 function requireJwtSecret(name: 'JWT_SECRET' | 'JWT_REFRESH_SECRET'): string {
   const secret = process.env[name];
   if (!secret || secret.length < 32) {
@@ -92,7 +92,7 @@ export function generateRefreshToken(user: AuthUser): string {
   );
 }
 
-export function authenticateToken(req: AuthRequest, res: Response, next: NextFunction) {
+export async function authenticateToken(req: AuthRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -100,17 +100,19 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
     return res.status(401).json({ success: false, message: 'Authentication required. Please sign in.', code: 'UNAUTHORIZED' });
   }
 
+  let decoded: AuthUser;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
-    const activeUser = db.prepare('SELECT is_active FROM users WHERE id = ?').get(decoded.id) as { is_active: number } | undefined;
-    if (!activeUser || !activeUser.is_active) {
-      return res.status(401).json({ success: false, message: 'Your account is inactive. Please contact your administrator.', code: 'ACCOUNT_INACTIVE' });
-    }
-    req.user = decoded;
-    next();
-  } catch (err) {
+    decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
+  } catch {
     return res.status(403).json({ success: false, message: 'Invalid or expired session token. Please sign in again.', code: 'FORBIDDEN' });
   }
+
+  const activeUser = await db.prepare('SELECT is_active FROM users WHERE id = ?').get(decoded.id) as { is_active: number } | undefined;
+  if (!activeUser || !activeUser.is_active) {
+    return res.status(401).json({ success: false, message: 'Your account is inactive. Please contact your administrator.', code: 'ACCOUNT_INACTIVE' });
+  }
+  req.user = decoded;
+  next();
 }
 
 export function requireRole(allowedRoles: string[]) {
@@ -200,7 +202,7 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
   const cleanEmpId = employeeId.trim().toUpperCase();
 
   // Check if email or employee ID already exists
-  const existingUser = db.prepare(`
+  const existingUser = await db.prepare(`
     SELECT id, email, employee_id FROM users 
     WHERE LOWER(email) = ? OR UPPER(employee_id) = ?
   `).get(cleanEmail, cleanEmpId) as any;
@@ -247,7 +249,7 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
   }
 
   const assignedTeam = teamId
-    ? db.prepare('SELECT id, leader_id, project_id FROM teams WHERE id = ?').get(teamId) as { id: string; leader_id: string | null; project_id: string | null } | undefined
+    ? await db.prepare('SELECT id, leader_id, project_id FROM teams WHERE id = ?').get(teamId) as { id: string; leader_id: string | null; project_id: string | null } | undefined
     : undefined;
   if (teamId && !assignedTeam) {
     return res.status(404).json({
@@ -293,7 +295,7 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
     });
   }
   for (const projectId of finalProjectIds) {
-    const project = db.prepare('SELECT status, contract_start_date, contract_end_date FROM projects WHERE id = ?')
+    const project = await db.prepare('SELECT status, contract_start_date, contract_end_date FROM projects WHERE id = ?')
       .get(projectId) as { status: string; contract_start_date: string | null; contract_end_date: string | null } | undefined;
     const today = new Date().toISOString().slice(0, 10);
     if (!project || !['IN_PROGRESS', 'ACTIVE'].includes(project.status) ||
@@ -307,7 +309,7 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
     }
   }
   const existingRosterMember = assignedRole === 'FIELD_TECHNICIAN' && teamId
-    ? db.prepare('SELECT id FROM team_members WHERE team_id = ? AND UPPER(employee_id) = ? AND is_active = 1').get(teamId, cleanEmpId) as { id: string } | undefined
+    ? await db.prepare('SELECT id FROM team_members WHERE team_id = ? AND UPPER(employee_id) = ? AND is_active = 1').get(teamId, cleanEmpId) as { id: string } | undefined
     : undefined;
 
   let finalDept = department;
@@ -330,75 +332,8 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
   }
 
   try {
-    await supabase.query(`
-      INSERT INTO users (
-        id, email, password_hash, full_name, phone_number, employee_id,
-        role, department, is_active, team_id, must_change_password, last_login, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, 1, $10, $10, $10)
-    `, [
-      userId,
-      cleanEmail,
-      passwordHash,
-      fullName.trim(),
-      phoneNumber ? phoneNumber.trim() : null,
-      cleanEmpId,
-      assignedRole,
-      finalDept,
-      teamId || null,
-      now
-    ]);
-    if (assignedRole === 'FIELD_TEAM_LEADER' && teamId) {
-      await supabase.query('UPDATE teams SET leader_id = $1, updated_at = $2 WHERE id = $3', [userId, now, teamId]);
-    }
-    if (assignedRole === 'FIELD_TECHNICIAN' && teamId) {
-      if (existingRosterMember) {
-        await supabase.query(`
-          UPDATE team_members SET full_name = $1, phone_number = $2, role_title = $3, updated_at = $4
-          WHERE id = $5 AND team_id = $6
-        `, [fullName.trim(), phoneNumber ? phoneNumber.trim() : null, roleTitle ? roleTitle.trim() : 'Field Technician', now, existingRosterMember.id, teamId]);
-      } else {
-        await supabase.query(`
-          INSERT INTO team_members (id, team_id, full_name, phone_number, employee_id, role_title, is_active, joined_at, created_at, updated_at)
-          VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $8)
-        `, [
-          `usrmember-${userId}`,
-          teamId,
-          fullName.trim(),
-          phoneNumber ? phoneNumber.trim() : null,
-          cleanEmpId,
-          roleTitle ? roleTitle.trim() : 'Field Technician',
-          now.split('T')[0],
-          now
-        ]);
-      }
-    }
-  } catch (error) {
-    await supabase.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => undefined);
-    if (assignedRole === 'FIELD_TEAM_LEADER' && teamId) {
-      await supabase.query('UPDATE teams SET leader_id = NULL WHERE id = $1 AND leader_id = $2', [teamId, userId]).catch(() => undefined);
-    }
-    if (assignedRole === 'FIELD_TECHNICIAN' && teamId && !existingRosterMember) {
-      await supabase.query('DELETE FROM team_members WHERE id = $1', [`usrmember-${userId}`]).catch(() => undefined);
-    }
-    const pgError = error as { code?: string };
-    if (pgError.code === '23505') {
-      return res.status(409).json({
-        success: false,
-        message: 'An account with this email address or Employee ID already exists.',
-        code: 'ACCOUNT_EXISTS'
-      });
-    }
-    console.error('Supabase employee account creation failed:', error);
-    return res.status(503).json({
-      success: false,
-      message: 'The employee account could not be created. Please try again shortly.',
-      code: 'AUTH_DATABASE_UNAVAILABLE'
-    });
-  }
-
-  try {
-    db.exec('BEGIN TRANSACTION');
-    db.prepare(`
+    await db.exec('BEGIN TRANSACTION');
+    await db.prepare(`
       INSERT INTO users (
         id, email, password_hash, full_name, phone_number, employee_id,
         role, department, is_active, team_id, must_change_password, last_login, created_at, updated_at
@@ -419,14 +354,14 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
     );
 
     if (assignedRole === 'FIELD_TEAM_LEADER' && teamId) {
-      db.prepare('UPDATE teams SET leader_id = ? WHERE id = ?').run(userId, teamId);
+      await db.prepare('UPDATE teams SET leader_id = ? WHERE id = ?').run(userId, teamId);
     }
     if (assignedRole === 'FIELD_TECHNICIAN' && teamId) {
       if (existingRosterMember) {
-        db.prepare('UPDATE team_members SET full_name = ?, phone_number = ?, role_title = ?, updated_at = ? WHERE id = ?')
+        await db.prepare('UPDATE team_members SET full_name = ?, phone_number = ?, role_title = ?, updated_at = ? WHERE id = ?')
           .run(fullName.trim(), phoneNumber ? phoneNumber.trim() : null, roleTitle ? roleTitle.trim() : 'Field Technician', now, existingRosterMember.id);
       } else {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO team_members (id, team_id, full_name, phone_number, employee_id, role_title, is_active, joined_at, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
         `).run(
@@ -443,23 +378,28 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
       }
     }
     for (const projectId of finalProjectIds) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO user_projects (user_id, project_id, assigned_at, assigned_by)
         VALUES (?, ?, ?, ?)
       `).run(userId, projectId, now, req.user?.id ?? null);
     }
 
-    db.exec('COMMIT');
+    await db.exec('COMMIT');
   } catch (error) {
-    db.exec('ROLLBACK');
-    await supabase.query('DELETE FROM users WHERE id = $1', [userId]).catch((cleanupError) => {
-      console.error('Failed to roll back Supabase account after local persistence error:', cleanupError);
-    });
-    console.error('Local employee account mirror failed:', error);
-    return res.status(500).json({
+    await db.exec('ROLLBACK');
+    const pgError = error as { code?: string };
+    if (pgError.code === '23505') {
+      return res.status(409).json({
+        success: false,
+        message: 'An account with this email address or Employee ID already exists.',
+        code: 'ACCOUNT_EXISTS'
+      });
+    }
+    console.error('PostgreSQL employee account creation failed:', error);
+    return res.status(503).json({
       success: false,
-      message: 'The account could not be synchronized to the operational roster.',
-      code: 'ACCOUNT_SYNC_FAILED'
+      message: 'The employee account could not be created. Please try again shortly.',
+      code: 'AUTH_DATABASE_UNAVAILABLE'
     });
   }
 
@@ -476,7 +416,7 @@ router.post('/register', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN',
     lastLogin: now,
   };
 
-  logAuditEvent({
+  await logAuditEvent({
     userId: req.user!.id,
     action: 'USER_CREATED',
     entity: 'User',
@@ -537,13 +477,12 @@ router.post('/login', async (req: Request, res: Response) => {
   // Find user by either email or employee_id
   let user: any;
   try {
-    const result = await supabase.query(`
+    user = await db.prepare(`
       SELECT * FROM users
-      WHERE LOWER(email) = LOWER($1) OR UPPER(employee_id) = UPPER($2)
-         OR LOWER(email) = LOWER($3) OR UPPER(employee_id) = UPPER($4)
+      WHERE LOWER(email) = LOWER(?) OR UPPER(employee_id) = UPPER(?)
+         OR LOWER(email) = LOWER(?) OR UPPER(employee_id) = UPPER(?)
       LIMIT 1
-    `, [loginId, loginId, resolvedId, resolvedId]);
-    user = result.rows[0];
+    `).get(loginId, loginId, resolvedId, resolvedId);
   } catch (error) {
     console.error('Supabase sign-in lookup failed:', error);
     return res.status(503).json({
@@ -586,21 +525,15 @@ router.post('/login', async (req: Request, res: Response) => {
   const isPasswordValid = bcrypt.compareSync(password, user.password_hash);
   if (!isPasswordValid) {
     recordFailedAttempt(throttleKey);
-    try {
-      await supabase.query(`
-        INSERT INTO audit_logs (id, user_id, action, entity, entity_id, ip_address, user_agent, reason, created_at)
-        VALUES ($1, $2, 'LOGIN_FAILED', 'User', $2, $3, $4, $5, $6)
-      `, [
-        `aud-${uuidv4().slice(0, 8)}`,
-        user.id,
-        req.ip || req.socket.remoteAddress || null,
-        req.headers['user-agent'] || null,
-        `Failed password attempt for ${user.email} (${user.employee_id})`,
-        new Date().toISOString()
-      ]);
-    } catch (error) {
-      console.error('Failed to write Supabase sign-in audit event:', error);
-    }
+    await logAuditEvent({
+      userId: user.id,
+      action: 'LOGIN_FAILED',
+      entity: 'User',
+      entityId: user.id,
+      ipAddress: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      reason: `Failed password attempt for ${user.email} (${user.employee_id})`
+    });
 
     return res.status(401).json({
       success: false,
@@ -614,18 +547,16 @@ router.post('/login', async (req: Request, res: Response) => {
 
   const now = new Date().toISOString();
   try {
-    await supabase.query('UPDATE users SET last_login = $1, updated_at = $1 WHERE id = $2', [now, user.id]);
-    await supabase.query(`
-      INSERT INTO audit_logs (id, user_id, action, entity, entity_id, ip_address, user_agent, reason, created_at)
-      VALUES ($1, $2, 'USER_LOGIN', 'User', $2, $3, $4, $5, $6)
-    `, [
-      `aud-${uuidv4().slice(0, 8)}`,
-      user.id,
-      req.ip || req.socket.remoteAddress || null,
-      req.headers['user-agent'] || null,
-      `Authenticated via ${loginId.includes('@') ? 'email' : 'employee ID'}`,
-      now
-    ]);
+    await db.prepare('UPDATE users SET last_login = ?, updated_at = ? WHERE id = ?').run(now, now, user.id);
+    await logAuditEvent({
+      userId: user.id,
+      action: 'USER_LOGIN',
+      entity: 'User',
+      entityId: user.id,
+      ipAddress: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      reason: `Authenticated via ${loginId.includes('@') ? 'email' : 'employee ID'}`
+    });
   } catch (error) {
     console.error('Supabase sign-in session update failed:', error);
     return res.status(503).json({
@@ -704,7 +635,7 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
     });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user!.id) as any;
+  const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user!.id) as any;
   if (!user) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
@@ -721,27 +652,13 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
   const newHash = bcrypt.hashSync(newPassword, 10);
   const now = new Date().toISOString();
 
-  try {
-    await supabase.query(
-      'UPDATE users SET password_hash = $1, must_change_password = 0, updated_at = $2 WHERE id = $3',
-      [newHash, now, user.id]
-    );
-  } catch (error) {
-    console.error('Supabase password change failed:', error);
-    return res.status(503).json({
-      success: false,
-      message: 'Your password could not be updated right now. Please try again shortly.',
-      code: 'AUTH_DATABASE_UNAVAILABLE'
-    });
-  }
-
-  db.prepare(`
+  await db.prepare(`
     UPDATE users 
     SET password_hash = ?, must_change_password = 0, updated_at = ? 
     WHERE id = ?
   `).run(newHash, now, user.id);
 
-  logAuditEvent({
+  await logAuditEvent({
     userId: user.id,
     action: 'PASSWORD_CHANGED',
     entity: 'User',
@@ -775,7 +692,7 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
 });
 
 // POST /api/v1/auth/forgot-password
-router.post('/forgot-password', (req: Request, res: Response) => {
+router.post('/forgot-password', async (req: Request, res: Response) => {
   const { identifier } = req.body;
   const loginId = (identifier || '').trim();
 
@@ -797,7 +714,7 @@ router.post('/forgot-password', (req: Request, res: Response) => {
   };
   const resolvedId = IDENTIFIER_ALIASES[loginId] || IDENTIFIER_ALIASES[loginId.toUpperCase()] || IDENTIFIER_ALIASES[loginId.toLowerCase()] || loginId;
 
-  const user = db.prepare(`
+  const user = await db.prepare(`
     SELECT * FROM users 
     WHERE LOWER(email) = LOWER(?) OR UPPER(employee_id) = UPPER(?)
        OR LOWER(email) = LOWER(?) OR UPPER(employee_id) = UPPER(?)
@@ -808,12 +725,12 @@ router.post('/forgot-password', (req: Request, res: Response) => {
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
     const now = new Date().toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO password_resets (id, user_id, token, expires_at, used, created_at)
       VALUES (?, ?, ?, ?, 0, ?)
     `).run(`pr-${uuidv4().slice(0, 8)}`, user.id, resetToken, expiresAt, now);
 
-    logAuditEvent({
+    await logAuditEvent({
       userId: user.id,
       action: 'PASSWORD_RESET_REQUESTED',
       entity: 'User',
@@ -854,7 +771,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: strengthCheck.reason });
   }
 
-  const resetRecord = db.prepare(`
+  const resetRecord = await db.prepare(`
     SELECT * FROM password_resets 
     WHERE token = ? AND used = 0 AND expires_at > ?
   `).get(resetToken, new Date().toISOString()) as any;
@@ -866,24 +783,10 @@ router.post('/reset-password', async (req: Request, res: Response) => {
   const newHash = bcrypt.hashSync(newPassword, 10);
   const now = new Date().toISOString();
 
-  try {
-    await supabase.query(
-      'UPDATE users SET password_hash = $1, must_change_password = 0, updated_at = $2 WHERE id = $3',
-      [newHash, now, resetRecord.user_id]
-    );
-  } catch (error) {
-    console.error('Supabase password reset failed:', error);
-    return res.status(503).json({
-      success: false,
-      message: 'Your password could not be reset right now. Please try again shortly.',
-      code: 'AUTH_DATABASE_UNAVAILABLE'
-    });
-  }
+  await db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?').run(newHash, now, resetRecord.user_id);
+  await db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(resetRecord.id);
 
-  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?').run(newHash, now, resetRecord.user_id);
-  db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(resetRecord.id);
-
-  logAuditEvent({
+  await logAuditEvent({
     userId: resetRecord.user_id,
     action: 'PASSWORD_RESET_COMPLETED',
     entity: 'User',
@@ -896,9 +799,9 @@ router.post('/reset-password', async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/auth/logout
-router.post('/logout', authenticateToken, (req: AuthRequest, res: Response) => {
+router.post('/logout', authenticateToken, async (req: AuthRequest, res: Response) => {
   if (req.user) {
-    logAuditEvent({
+    await logAuditEvent({
       userId: req.user.id,
       action: 'USER_LOGOUT',
       entity: 'User',
@@ -912,7 +815,7 @@ router.post('/logout', authenticateToken, (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/v1/auth/refresh
-router.post('/refresh', (req: Request, res: Response) => {
+router.post('/refresh', async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
   if (!refreshToken) {
     return res.status(401).json({ success: false, message: 'Refresh token required' });
@@ -920,7 +823,7 @@ router.post('/refresh', (req: Request, res: Response) => {
 
   try {
     const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as any;
-    const user = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1').get(decoded.id) as any;
+    const user = await db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1').get(decoded.id) as any;
     if (!user) {
       return res.status(403).json({ success: false, message: 'User session invalid or deactivated' });
     }
@@ -946,7 +849,7 @@ router.post('/refresh', (req: Request, res: Response) => {
 });
 
 // POST /api/v1/auth/switch-persona (Development testing only)
-router.post('/switch-persona', authenticateToken, (req: AuthRequest, res: Response) => {
+router.post('/switch-persona', authenticateToken, async (req: AuthRequest, res: Response) => {
   if (process.env.NODE_ENV === 'production') {
     return res.status(404).json({ success: false, message: 'Not found' });
   }
@@ -964,7 +867,7 @@ router.post('/switch-persona', authenticateToken, (req: AuthRequest, res: Respon
     params.push(role);
   }
 
-  const user = db.prepare(query + ' LIMIT 1').get(...params) as any;
+  const user = await db.prepare(query + ' LIMIT 1').get(...params) as any;
   if (!user) {
     return res.status(404).json({ success: false, message: 'Target user persona not found' });
   }
@@ -1001,19 +904,16 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => 
   let user: any;
   let team: any = null;
   try {
-    const result = await supabase.query(`
+    user = await db.prepare(`
       SELECT id, email, full_name, phone_number, employee_id, role, department,
              team_id, is_active, must_change_password, last_login
       FROM users
-      WHERE id = $1
-    `, [req.user.id]);
-    user = result.rows[0];
+      WHERE id = ?
+    `).get(req.user.id);
     if (user?.team_id) {
-      const teamResult = await supabase.query(
-        'SELECT id, team_code, name, assigned_area, project_id, region_id FROM teams WHERE id = $1',
-        [user.team_id]
-      );
-      team = teamResult.rows[0] || null;
+      team = await db.prepare(
+        'SELECT id, team_code, name, assigned_area, project_id, region_id FROM teams WHERE id = ?'
+      ).get(user.team_id) || null;
     }
   } catch (error) {
     console.error('Supabase profile lookup failed:', error);
@@ -1047,8 +947,8 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => 
 });
 
 // GET /api/v1/users (Protected: strictly require ADMIN or SUPER_ADMIN or AUDITOR)
-router.get('/users', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'AUDITOR']), (req: AuthRequest, res: Response) => {
-  const users = db.prepare(`
+router.get('/users', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'AUDITOR']), async (req: AuthRequest, res: Response) => {
+  const users = await db.prepare(`
     SELECT u.id, u.email, u.full_name as fullName, u.phone_number as phoneNumber,
            u.employee_id as employeeId, u.role, u.department, u.is_active as isActive,
            u.must_change_password as mustChangePassword, u.last_login as lastLogin,

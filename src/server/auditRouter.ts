@@ -1,11 +1,12 @@
 import { Router, Response } from 'express';
 import { db } from './db.js';
 import { AuthRequest, authenticateToken } from './auth.js';
+import { createAsyncRouter } from './asyncRouter.js';
 
-const router = Router();
+const router = createAsyncRouter();
 
 // GET /api/v1/audit-logs
-router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
+router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { action, entity, entityId, userId, limit } = req.query;
 
   let query = `
@@ -40,7 +41,7 @@ router.get('/', authenticateToken, (req: AuthRequest, res: Response) => {
   query += ' ORDER BY al.created_at DESC LIMIT ?';
   params.push(Number(limit) || 100);
 
-  const logs = db.prepare(query).all(...params);
+  const logs = await db.prepare(query).all(...params);
   return res.json({ success: true, count: logs.length, logs });
 });
 

@@ -19,15 +19,6 @@ function quoteIdentifier(value: string): string {
 async function migrate() {
   await postgres.connect();
   try {
-    const existingTables = await postgres.query<{ table_name: string }>(`
-      SELECT table_name
-      FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-    `);
-    if (existingTables.rows.length > 0) {
-      throw new Error('Supabase public schema is not empty; migration stopped without changing it.');
-    }
-
     const definitions = sqlite.prepare(`
       SELECT name, sql
       FROM sqlite_master
@@ -62,31 +53,41 @@ async function migrate() {
       if (!createSql) throw new Error(`Missing schema definition for ${name}.`);
       await postgres.query(createSql.replace(/^CREATE TABLE(?! IF NOT EXISTS)/i, 'CREATE TABLE IF NOT EXISTS'));
     }
+    await postgres.query(`
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS network_type TEXT NOT NULL DEFAULT 'FTTH';
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS contract_start_date TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS contract_end_date TEXT;
+    `);
 
-    const migratedCounts: Record<string, number> = {};
+    const migratedCounts: Record<string, { source: number; inserted: number }> = {};
     for (const table of orderedTables) {
-      const columns = sqlite.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all() as Array<{ name: string }>;
+      const columns = sqlite.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all() as Array<{ name: string; pk: number }>;
       if (columns.length === 0) throw new Error(`No columns found for ${table}.`);
       const columnNames = columns.map((column) => column.name);
+      const primaryKeyColumns = columns.filter((column) => column.pk > 0).sort((a, b) => a.pk - b.pk).map((column) => column.name);
+      if (primaryKeyColumns.length === 0) throw new Error(`No primary key found for ${table}; safe merge is not possible.`);
       const rows = sqlite.prepare(`SELECT * FROM ${quoteIdentifier(table)}`).all() as Array<Record<string, unknown>>;
       const columnSql = columnNames.map(quoteIdentifier).join(', ');
       const valueSql = columnNames.map((_, index) => `$${index + 1}`).join(', ');
-      const insertSql = `INSERT INTO ${quoteIdentifier(table)} (${columnSql}) VALUES (${valueSql})`;
+      const insertSql = `INSERT INTO ${quoteIdentifier(table)} (${columnSql}) VALUES (${valueSql}) ON CONFLICT DO NOTHING`;
+      const keyPredicate = primaryKeyColumns.map((column, index) => `${quoteIdentifier(column)} = $${index + 1}`).join(' AND ');
+      let inserted = 0;
       for (const row of rows) {
-        await postgres.query(insertSql, columnNames.map((column) => row[column]));
+        const insertResult = await postgres.query(insertSql, columnNames.map((column) => row[column]));
+        inserted += insertResult.rowCount || 0;
+        const exists = await postgres.query(
+          `SELECT 1 FROM ${quoteIdentifier(table)} WHERE ${keyPredicate}`,
+          primaryKeyColumns.map((column) => row[column])
+        );
+        if (exists.rowCount !== 1) {
+          throw new Error(`Primary-key verification failed while merging ${table}.`);
+        }
       }
-      migratedCounts[table] = rows.length;
-    }
-
-    for (const table of orderedTables) {
-      const result = await postgres.query(`SELECT count(*)::integer AS count FROM ${quoteIdentifier(table)}`);
-      if (result.rows[0].count !== migratedCounts[table]) {
-        throw new Error(`Row count verification failed for ${table}.`);
-      }
+      migratedCounts[table] = { source: rows.length, inserted };
     }
 
     await postgres.query('COMMIT');
-    console.log(JSON.stringify({ migratedTables: orderedTables.length, migratedRowCounts: migratedCounts }, null, 2));
+    console.log(JSON.stringify({ mergedTables: orderedTables.length, perTable: migratedCounts }, null, 2));
   } catch (error) {
     await postgres.query('ROLLBACK').catch(() => undefined);
     throw error;
