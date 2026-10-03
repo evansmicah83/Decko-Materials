@@ -32,6 +32,8 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
   const [teams, setTeams] = useState<Team[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [loadingFormData, setLoadingFormData] = useState(false);
+  const [formDataError, setFormDataError] = useState<string | null>(null);
 
   // Form State
   const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -49,6 +51,11 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
   const [items, setItems] = useState<RequestLineItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fieldUser = ['FIELD_TECHNICIAN', 'FIELD_TEAM_LEADER'].includes(user?.role || '');
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId);
+  const availableProjects = selectedTeam?.projectId
+    ? projects.filter((project) => project.id === selectedTeam.projectId)
+    : [];
 
   useEffect(() => {
     if (!isOpen) return;
@@ -56,36 +63,56 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
     loadFormData();
   }, [isOpen]);
 
-  const loadFormData = async () => {
-    try {
-      const [tRes, pRes, mRes] = await Promise.all([
-        api.getTeams(),
-        api.getProjects(),
-        api.getMaterials({ activeOnly: 'true' })
-      ]);
-
-      if (tRes.success) {
-        setTeams(tRes.teams);
-        if (user?.teamId) {
-          setSelectedTeamId(user.teamId);
-        } else if (tRes.teams.length > 0) {
-          setSelectedTeamId(tRes.teams[0].id);
-        }
-      }
-
-      if (pRes.success) {
-        setProjects(pRes.projects);
-        if (pRes.projects.length > 0) {
-          setSelectedProjectId(pRes.projects[0].id);
-        }
-      }
-
-      if (mRes.success) {
-        setMaterials(mRes.materials);
-      }
-    } catch (e) {
-      console.error(e);
+  useEffect(() => {
+    if (selectedTeam?.projectId) {
+      setSelectedProjectId(selectedTeam.projectId);
+    } else if (!projects.some((project) => project.id === selectedProjectId)) {
+      setSelectedProjectId(projects[0]?.id || '');
     }
+  }, [selectedTeamId, selectedTeam?.projectId, projects, selectedProjectId]);
+
+  const loadFormData = async () => {
+    setLoadingFormData(true);
+    setFormDataError(null);
+    const [teamsResult, projectsResult, materialsResult] = await Promise.allSettled([
+      api.getTeams(),
+      api.getProjects(),
+      api.getMaterials({ activeOnly: 'true' })
+    ]);
+    const failures: string[] = [];
+
+    if (teamsResult.status === 'fulfilled' && teamsResult.value.success) {
+      const loadedTeams = teamsResult.value.teams;
+      setTeams(loadedTeams);
+      const initialTeamId = user?.teamId && loadedTeams.some((team) => team.id === user.teamId)
+        ? user.teamId
+        : loadedTeams[0]?.id || '';
+      setSelectedTeamId(initialTeamId);
+    } else {
+      const message = teamsResult.status === 'rejected' ? teamsResult.reason : null;
+      failures.push(`teams: ${message instanceof Error ? message.message : 'could not be loaded'}`);
+    }
+
+    if (projectsResult.status === 'fulfilled' && projectsResult.value.success) {
+      setProjects(projectsResult.value.projects);
+      setSelectedProjectId(projectsResult.value.projects[0]?.id || '');
+    } else {
+      const message = projectsResult.status === 'rejected' ? projectsResult.reason : null;
+      failures.push(`projects: ${message instanceof Error ? message.message : 'could not be loaded'}`);
+    }
+
+    if (materialsResult.status === 'fulfilled' && materialsResult.value.success) {
+      setMaterials(materialsResult.value.materials);
+    } else {
+      const message = materialsResult.status === 'rejected' ? materialsResult.reason : null;
+      failures.push(`materials: ${message instanceof Error ? message.message : 'could not be loaded'}`);
+    }
+    if (failures.length > 0) {
+      const message = `Unable to load ${failures.join('; ')}. Close and reopen the form to retry.`;
+      setFormDataError(message);
+      console.error(message);
+    }
+    setLoadingFormData(false);
   };
 
   const addItemRow = () => {
@@ -148,8 +175,20 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
 
   const handleSubmit = async (isDraft: boolean) => {
     setError(null);
+    if (loadingFormData || formDataError || materials.length === 0 || teams.length === 0 || projects.length === 0) {
+      setError(formDataError || 'Teams, projects, and at least one active material must load before creating a request.');
+      return;
+    }
     if (!selectedTeamId || !selectedProjectId || !reason.trim() || items.length === 0) {
       setError('Please select team, project, provide a reason, and add at least one material.');
+      return;
+    }
+    if (fieldUser && selectedTeamId !== user?.teamId) {
+      setError('You can only create requests for your assigned team.');
+      return;
+    }
+    if (selectedTeam?.projectId && selectedProjectId !== selectedTeam.projectId) {
+      setError('The selected project does not match the project assigned to this field team.');
       return;
     }
 
@@ -219,6 +258,18 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
               <span>{error}</span>
             </div>
           )}
+          {formDataError && (
+            <div role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{formDataError}</span>
+            </div>
+          )}
+          {loadingFormData && <p className="text-xs text-slate-500">Loading teams, projects, and store materials…</p>}
+          {!loadingFormData && !formDataError && materials.length === 0 && (
+            <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              The material catalog is empty. Ask an administrator or store officer to add active materials before submitting a field request.
+            </div>
+          )}
 
           {/* Row 1: Team & Project */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -229,8 +280,10 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
               <select
                 value={selectedTeamId}
                 onChange={(e) => setSelectedTeamId(e.target.value)}
+                disabled={fieldUser || loadingFormData}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
               >
+                {teams.length === 0 && <option value="">No field teams available</option>}
                 {teams.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.teamCode} — {t.name} ({t.assignedArea || 'Metro'})
@@ -246,14 +299,19 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
               <select
                 value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
+                disabled={loadingFormData || !!selectedTeam?.projectId}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
               >
-                {projects.map((p) => (
+                {availableProjects.length === 0 && <option value="">No project assigned to this team</option>}
+                {availableProjects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} ({p.client})
                   </option>
                 ))}
               </select>
+              {selectedTeam && !selectedTeam.projectId && (
+                <p className="mt-1 text-[11px] text-amber-700">Assign a project to this team before submitting a material request.</p>
+              )}
             </div>
           </div>
 
@@ -337,7 +395,8 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
               <button
                 type="button"
                 onClick={addItemRow}
-                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-xs font-semibold flex items-center gap-1 transition"
+                disabled={loadingFormData || materials.length === 0 || !!formDataError}
+                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 text-blue-700 rounded text-xs font-semibold flex items-center gap-1 transition"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Item
@@ -345,6 +404,9 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
             </div>
 
             <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100">
+              {!loadingFormData && materials.length === 0 && items.length === 0 && (
+                <div className="p-4 text-center text-xs text-slate-500">There are no active materials to request.</div>
+              )}
               {items.map((item, idx) => (
                 <div key={item.id} className="p-3 bg-white hover:bg-slate-50/50 space-y-2">
                   <div className="grid grid-cols-12 gap-2 items-center">
@@ -420,7 +482,7 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || loadingFormData || !!formDataError || materials.length === 0 || teams.length === 0 || availableProjects.length === 0}
               onClick={() => handleSubmit(true)}
               className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-md text-xs transition"
             >
@@ -429,7 +491,7 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
 
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || loadingFormData || !!formDataError || materials.length === 0 || teams.length === 0 || availableProjects.length === 0}
               onClick={() => handleSubmit(false)}
               className="px-5 py-2 bg-[#0B2545] hover:bg-[#133966] text-white font-bold rounded-md text-xs flex items-center gap-1.5 shadow-sm transition"
             >

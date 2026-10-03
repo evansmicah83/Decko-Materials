@@ -15,12 +15,12 @@ router.get(['/', '/balances'], authenticateToken, async (req: AuthRequest, res: 
   const { warehouseId, lowStockOnly } = req.query;
 
   let query = `
-    SELECT ib.id, ib.warehouse_id as warehouseId, w.name as warehouseName, w.code as warehouseCode,
-           m.id as materialId, m.sku, m.name as materialName, m.category, m.unit,
-           ib.quantity as warehouseStock, m.current_stock as totalStock,
-           m.minimum_stock as minimumStock, m.reorder_level as reorderLevel,
-           m.is_serial_required as isSerialRequired, m.requires_safaricom_tracking as requiresSafaricomTracking,
-           m.store_location as storeLocation, m.unit_cost as unitCost
+    SELECT ib.id, ib.warehouse_id as "warehouseId", w.name as "warehouseName", w.code as "warehouseCode",
+           m.id as "materialId", m.sku, m.name as "materialName", m.category, m.unit,
+           ib.quantity as "warehouseStock", m.current_stock as "totalStock",
+           m.minimum_stock as "minimumStock", m.reorder_level as "reorderLevel",
+           m.is_serial_required as "isSerialRequired", m.requires_safaricom_tracking as "requiresSafaricomTracking",
+           m.store_location as "storeLocation", m.unit_cost as "unitCost"
     FROM inventory_balances ib
     JOIN materials m ON ib.material_id = m.id
     JOIN warehouses w ON ib.warehouse_id = w.id
@@ -88,10 +88,10 @@ router.get('/transactions', authenticateToken, async (req: AuthRequest, res: Res
   const { materialId, type, limit } = req.query;
 
   let query = `
-    SELECT it.id, it.material_id as materialId, m.sku, m.name as materialName, m.unit,
-           it.type, it.quantity, it.previous_stock as previousStock, it.new_stock as newStock,
+    SELECT it.id, it.material_id as "materialId", m.sku, m.name as "materialName", m.unit,
+           it.type, it.quantity, it.previous_stock as "previousStock", it.new_stock as "newStock",
            it.source, it.destination, it.reference, it.reason,
-           it.user_id as userId, u.full_name as userName, it.created_at as createdAt
+           it.user_id as "userId", u.full_name as "userName", it.created_at as "createdAt"
     FROM inventory_transactions it
     JOIN materials m ON it.material_id = m.id
     LEFT JOIN users u ON it.user_id = u.id
@@ -140,6 +140,11 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
   if (isNaN(numQty) || numQty <= 0) {
     return res.status(400).json({ success: false, message: 'Quantity must be a positive number' });
   }
+  const inboundTypes = ['RECEIPT', 'PURCHASE', 'RETURN'];
+  const outboundTypes = ['ISSUE', 'DAMAGE', 'LOSS', 'DISPOSAL', 'ADJUSTMENT'];
+  if (!inboundTypes.includes(type) && !outboundTypes.includes(type)) {
+    return res.status(400).json({ success: false, message: 'Unsupported inventory transaction type.' });
+  }
 
   const targetWh = typeof warehouseId === 'string' ? warehouseId : '';
   if (!targetWh) {
@@ -151,9 +156,9 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
   const prevStock = Number(material.current_stock);
   let newStock = prevStock;
 
-  if (['RECEIPT', 'PURCHASE', 'RETURN'].includes(type)) {
+  if (inboundTypes.includes(type)) {
     newStock = prevStock + numQty;
-  } else if (['ISSUE', 'DAMAGE', 'LOSS', 'DISPOSAL', 'ADJUSTMENT'].includes(type)) {
+  } else {
     if (prevStock < numQty && type !== 'ADJUSTMENT') {
       return res.status(400).json({
         success: false,
@@ -162,6 +167,17 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
       });
     }
     newStock = Math.max(0, prevStock - numQty);
+  }
+
+  const existingBal = await db.prepare('SELECT id, quantity FROM inventory_balances WHERE warehouse_id = ? AND material_id = ?')
+    .get(targetWh, materialId) as { id: string; quantity: number } | undefined;
+  const warehouseStock = Number(existingBal?.quantity || 0);
+  if (!inboundTypes.includes(type) && warehouseStock < numQty) {
+    return res.status(400).json({
+      success: false,
+      message: `Selected warehouse has ${warehouseStock} ${material.unit}; cannot deduct ${numQty}.`,
+      code: 'INSUFFICIENT_WAREHOUSE_STOCK'
+    });
   }
 
   const now = new Date().toISOString();
@@ -173,13 +189,12 @@ router.post('/adjust', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', '
     await db.prepare('UPDATE materials SET current_stock = ?, updated_at = ? WHERE id = ?').run(newStock, now, materialId);
     
     // Update or insert warehouse balance
-    const existingBal = await db.prepare('SELECT id, quantity FROM inventory_balances WHERE warehouse_id = ? AND material_id = ?').get(targetWh, materialId) as any;
     if (existingBal) {
-      const whNew = ['RECEIPT', 'PURCHASE', 'RETURN'].includes(type) ? Number(existingBal.quantity) + numQty : Math.max(0, Number(existingBal.quantity) - numQty);
+      const whNew = inboundTypes.includes(type) ? warehouseStock + numQty : warehouseStock - numQty;
       await db.prepare('UPDATE inventory_balances SET quantity = ?, updated_at = ? WHERE id = ?').run(whNew, now, existingBal.id);
     } else {
       await db.prepare('INSERT INTO inventory_balances (id, warehouse_id, material_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?)')
-        .run(`bal-${uuidv4().slice(0, 8)}`, targetWh, materialId, newStock, now);
+        .run(`bal-${uuidv4().slice(0, 8)}`, targetWh, materialId, numQty, now);
     }
 
     await db.prepare(`
@@ -221,11 +236,11 @@ router.get('/tracked-units', authenticateToken, async (req: AuthRequest, res: Re
   const { materialId, status, search } = req.query;
 
   let query = `
-    SELECT tu.id, tu.serial_number as serialNumber, tu.barcode, tu.material_id as materialId,
-           m.name as materialName, m.sku, m.category, tu.status, tu.current_location as currentLocation,
-           tu.current_team_id as currentTeamId, t.team_code as teamCode, t.name as teamName,
-           tu.custodian_name as custodianName, tu.safaricom_tag as safaricomTag,
-           tu.created_at as createdAt, tu.updated_at as updatedAt
+    SELECT tu.id, tu.serial_number as "serialNumber", tu.barcode, tu.material_id as "materialId",
+           m.name as "materialName", m.sku, m.category, tu.status, tu.current_location as "currentLocation",
+           tu.current_team_id as "currentTeamId", t.team_code as "teamCode", t.name as "teamName",
+           tu.custodian_name as "custodianName", tu.safaricom_tag as "safaricomTag",
+           tu.created_at as "createdAt", tu.updated_at as "updatedAt"
     FROM tracked_units tu
     JOIN materials m ON tu.material_id = m.id
     LEFT JOIN teams t ON tu.current_team_id = t.id
@@ -257,8 +272,8 @@ router.get('/chain-of-custody/:serial', authenticateToken, async (req: AuthReque
   const serial = req.params.serial.trim();
 
   const unit = await db.prepare(`
-    SELECT tu.*, m.name as materialName, m.sku, m.category, m.requires_safaricom_tracking as requiresSafaricomTracking,
-           t.team_code as teamCode, t.name as teamName
+    SELECT tu.*, m.name as "materialName", m.sku, m.category, m.requires_safaricom_tracking as "requiresSafaricomTracking",
+           t.team_code as "teamCode", t.name as "teamName"
     FROM tracked_units tu
     JOIN materials m ON tu.material_id = m.id
     LEFT JOIN teams t ON tu.current_team_id = t.id
@@ -275,10 +290,10 @@ router.get('/chain-of-custody/:serial', authenticateToken, async (req: AuthReque
 
   // Find all issues where this serial was included
   const issues = await db.prepare(`
-    SELECT mi.id, mi.request_id as requestId, mr.request_number as requestNumber,
-           t.team_code as teamCode, t.name as teamName, p.name as projectName,
-           mi.recipient_name as recipientName, u.full_name as storeOfficerName,
-           mi.issued_at as timestamp, 'ISSUED_TO_TEAM' as eventType
+    SELECT mi.id, mi.request_id as "requestId", mr.request_number as "requestNumber",
+           t.team_code as "teamCode", t.name as "teamName", p.name as "projectName",
+           mi.recipient_name as "recipientName", u.full_name as "storeOfficerName",
+           mi.issued_at as "timestamp", 'ISSUED_TO_TEAM' as "eventType"
     FROM material_issue_items mii
     JOIN material_issues mi ON mii.issue_id = mi.id
     JOIN material_requests mr ON mi.request_id = mr.id
@@ -291,10 +306,10 @@ router.get('/chain-of-custody/:serial', authenticateToken, async (req: AuthReque
 
   // Find all returns where this serial was returned
   const returns = await db.prepare(`
-    SELECT mr.id, mr.request_id as requestId, req.request_number as requestNumber,
-           t.team_code as teamCode, t.name as teamName,
-           u.full_name as receiverName, mri.condition, mri.notes,
-           mr.created_at as timestamp, 'RETURNED_TO_STORE' as eventType
+    SELECT mr.id, mr.request_id as "requestId", req.request_number as "requestNumber",
+           t.team_code as "teamCode", t.name as "teamName",
+           u.full_name as "receiverName", mri.condition, mri.notes,
+           mr.created_at as "timestamp", 'RETURNED_TO_STORE' as "eventType"
     FROM material_return_items mri
     JOIN material_returns mr ON mri.return_id = mr.id
     LEFT JOIN material_requests req ON mr.request_id = req.id

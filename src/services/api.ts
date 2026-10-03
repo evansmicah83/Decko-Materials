@@ -1,4 +1,4 @@
-import { MaterialRequest, Material, InventoryBalance, InventoryTransaction, TrackedUnit, Team, Project, Warehouse, AppNotification, AuditLogRecord } from '../types';
+import { CreateMaterialPayload, MaterialRequest, Material, InventoryBalance, InventoryTransaction, TrackedUnit, Team, Project, Warehouse, AppNotification, AuditLogRecord } from '../types';
 
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
 const API_BASE = (configuredApiBase || '/api/v1').replace(/\/+$/, '');
@@ -204,7 +204,7 @@ export const api = {
 
   getMaterialCategories: () => request<{ success: boolean; categories: { code: string; label: string }[] }>('/materials/categories'),
 
-  createMaterial: (payload: any) =>
+  createMaterial: (payload: CreateMaterialPayload) =>
     request<{ success: boolean; message: string; id: string }>('/materials', {
       method: 'POST',
       body: JSON.stringify(payload)

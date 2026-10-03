@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { Material, InventoryBalance, InventoryTransaction, TrackedUnit, Warehouse } from '../../types';
+import { Material, MaterialCategory, InventoryBalance, InventoryTransaction, TrackedUnit, Warehouse } from '../../types';
 import {
   Boxes,
   Package,
@@ -9,6 +9,7 @@ import {
   History,
   AlertTriangle,
   Plus,
+  PackagePlus,
   Search,
   ArrowRight,
   TrendingDown,
@@ -27,7 +28,9 @@ export const InventoryView: React.FC = () => {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [trackedUnits, setTrackedUnits] = useState<TrackedUnit[]>([]);
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
+  const [catalogMaterials, setCatalogMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
 
   // Search & Filters
   const [search, setSearch] = useState('');
@@ -53,7 +56,25 @@ export const InventoryView: React.FC = () => {
   const [warehouseManager, setWarehouseManager] = useState('');
   const [warehouseError, setWarehouseError] = useState<string | null>(null);
   const [creatingWarehouse, setCreatingWarehouse] = useState(false);
+  const [showCreateMaterialModal, setShowCreateMaterialModal] = useState(false);
+  const [materialSku, setMaterialSku] = useState('');
+  const [materialName, setMaterialName] = useState('');
+  const [materialCategory, setMaterialCategory] = useState<MaterialCategory>('OTHER');
+  const [materialUnit, setMaterialUnit] = useState('pcs');
+  const [materialUnitCost, setMaterialUnitCost] = useState('0');
+  const [materialInitialStock, setMaterialInitialStock] = useState('0');
+  const [materialWarehouseId, setMaterialWarehouseId] = useState('');
+  const [materialMinimumStock, setMaterialMinimumStock] = useState('10');
+  const [materialReorderLevel, setMaterialReorderLevel] = useState('20');
+  const [materialMaximumStock, setMaterialMaximumStock] = useState('1000');
+  const [materialStoreLocation, setMaterialStoreLocation] = useState('');
+  const [materialSupplier, setMaterialSupplier] = useState('');
+  const [materialIsSerialRequired, setMaterialIsSerialRequired] = useState(false);
+  const [materialTracksSafaricom, setMaterialTracksSafaricom] = useState(false);
+  const [materialError, setMaterialError] = useState<string | null>(null);
+  const [creatingMaterial, setCreatingMaterial] = useState(false);
   const canManageWarehouses = ['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER'].includes(user?.role || '');
+  const canManageMaterials = ['SUPER_ADMIN', 'ADMIN', 'STORE_OFFICER', 'PROCUREMENT_OFFICER'].includes(user?.role || '');
 
   useEffect(() => {
     loadData();
@@ -61,6 +82,7 @@ export const InventoryView: React.FC = () => {
 
   useEffect(() => {
     loadWarehouses();
+    loadMaterials();
   }, []);
 
   const loadWarehouses = async () => {
@@ -76,8 +98,23 @@ export const InventoryView: React.FC = () => {
     }
   };
 
+  const loadMaterials = async () => {
+    try {
+      const response = await api.getMaterials({ activeOnly: 'true' });
+      setCatalogMaterials(response.materials);
+      setMaterialError(null);
+      if (!adjustMaterialId && response.materials.length > 0) {
+        setAdjustMaterialId(response.materials[0].id);
+      }
+    } catch (error) {
+      console.error('Failed to load the material catalog:', error);
+      setMaterialError(error instanceof Error ? error.message : 'Unable to load the material catalog.');
+    }
+  };
+
   const loadData = async () => {
     setLoading(true);
+    setInventoryError(null);
     try {
       if (activeTab === 'BALANCES') {
         const res = await api.getInventoryBalances({
@@ -93,6 +130,7 @@ export const InventoryView: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
+      setInventoryError(e instanceof Error ? e.message : 'Unable to load inventory data.');
     } finally {
       setLoading(false);
     }
@@ -128,12 +166,65 @@ export const InventoryView: React.FC = () => {
       });
       if (res.success) {
         setShowAdjustModal(false);
-        loadData();
+        await Promise.all([loadData(), loadMaterials()]);
       }
     } catch (err: any) {
       setAdjustError(err.message || 'Adjustment failed');
     } finally {
       setAdjusting(false);
+    }
+  };
+
+  const handleCreateMaterial = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setMaterialError(null);
+    const initialStock = Number(materialInitialStock);
+    if (!Number.isFinite(initialStock) || initialStock < 0) {
+      setMaterialError('Initial stock must be a valid non-negative number.');
+      return;
+    }
+    if (initialStock > 0 && !materialWarehouseId) {
+      setMaterialError('Choose the warehouse receiving the initial stock.');
+      return;
+    }
+
+    setCreatingMaterial(true);
+    try {
+      await api.createMaterial({
+        sku: materialSku.trim(),
+        name: materialName.trim(),
+        category: materialCategory,
+        unit: materialUnit.trim(),
+        unitCost: Number(materialUnitCost),
+        initialStock,
+        warehouseId: initialStock > 0 ? materialWarehouseId : undefined,
+        minimumStock: Number(materialMinimumStock),
+        reorderLevel: Number(materialReorderLevel),
+        maximumStock: Number(materialMaximumStock),
+        storeLocation: materialStoreLocation.trim() || undefined,
+        supplier: materialSupplier.trim() || undefined,
+        isSerialRequired: materialIsSerialRequired,
+        requiresSafaricomTracking: materialTracksSafaricom
+      });
+      setMaterialSku('');
+      setMaterialName('');
+      setMaterialCategory('OTHER');
+      setMaterialUnit('pcs');
+      setMaterialUnitCost('0');
+      setMaterialInitialStock('0');
+      setMaterialMinimumStock('10');
+      setMaterialReorderLevel('20');
+      setMaterialMaximumStock('1000');
+      setMaterialStoreLocation('');
+      setMaterialSupplier('');
+      setMaterialIsSerialRequired(false);
+      setMaterialTracksSafaricom(false);
+      setShowCreateMaterialModal(false);
+      await Promise.all([loadMaterials(), loadData()]);
+    } catch (error) {
+      setMaterialError(error instanceof Error ? error.message : 'Failed to create material.');
+    } finally {
+      setCreatingMaterial(false);
     }
   };
 
@@ -176,6 +267,20 @@ export const InventoryView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {canManageMaterials && (
+            <button
+              type="button"
+              onClick={() => {
+                setMaterialError(null);
+                setMaterialWarehouseId(warehouses[0]?.id || '');
+                setShowCreateMaterialModal(true);
+              }}
+              className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition self-start sm:self-auto"
+            >
+              <PackagePlus className="w-4 h-4 text-[#04446F]" />
+              <span>Add Material</span>
+            </button>
+          )}
           {canManageWarehouses && (
             <button
               type="button"
@@ -186,11 +291,11 @@ export const InventoryView: React.FC = () => {
               <span>Add Warehouse</span>
             </button>
           )}
-          <button
-            disabled={warehouses.length === 0}
-            title={warehouses.length === 0 ? 'Create a warehouse before posting inventory.' : undefined}
+          {canManageWarehouses && <button
+            disabled={warehouses.length === 0 || catalogMaterials.length === 0}
+            title={warehouses.length === 0 ? 'Create a warehouse before posting inventory.' : catalogMaterials.length === 0 ? 'Add a material before posting inventory.' : undefined}
             onClick={() => {
-              if (balances.length > 0) setAdjustMaterialId(balances[0].materialId);
+              if (catalogMaterials.length > 0) setAdjustMaterialId(catalogMaterials[0].id);
               if (warehouses.length > 0) setAdjustWarehouseId(warehouses[0].id);
               setAdjustError(null);
               setShowAdjustModal(true);
@@ -199,9 +304,15 @@ export const InventoryView: React.FC = () => {
           >
             <Plus className="w-4 h-4 text-amber-400" />
             <span>Stock Adjustment / Receipt</span>
-          </button>
+          </button>}
         </div>
       </div>
+
+      {(inventoryError || (materialError && !showCreateMaterialModal)) && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+          {inventoryError || materialError}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
@@ -269,6 +380,113 @@ export const InventoryView: React.FC = () => {
               />
             </div>
           )}
+
+          {showCreateMaterialModal && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-900/80 p-4 backdrop-blur-xs">
+              <div className="my-auto max-h-[92vh] w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+                <div className="flex items-center justify-between bg-[#0B2545] p-4 text-white">
+                  <div>
+                    <h3 className="text-sm font-bold">Add Material to Store Catalog</h3>
+                    <p className="mt-0.5 text-[11px] text-slate-300">New active materials become available in field requisitions.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowCreateMaterialModal(false)} className="text-slate-300 hover:text-white" aria-label="Close add material form">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <form onSubmit={handleCreateMaterial} className="max-h-[calc(92vh-64px)] space-y-4 overflow-y-auto p-5 text-xs">
+                  {materialError && <div role="alert" className="rounded border border-red-200 bg-red-50 p-2.5 text-red-700">{materialError}</div>}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">SKU *</label>
+                      <input value={materialSku} onChange={(event) => setMaterialSku(event.target.value)} placeholder="e.g. DROP-CABLE-1C" className="w-full rounded border border-slate-300 px-3 py-2 font-mono uppercase" required />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Material Name *</label>
+                      <input value={materialName} onChange={(event) => setMaterialName(event.target.value)} placeholder="e.g. 1-Core FTTH Drop Cable" className="w-full rounded border border-slate-300 px-3 py-2" required />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Category *</label>
+                      <select value={materialCategory} onChange={(event) => setMaterialCategory(event.target.value as MaterialCategory)} className="w-full rounded border border-slate-300 bg-white px-3 py-2">
+                        <option value="FIBRE_CABLE">Fibre Cable</option>
+                        <option value="CONNECTORS">Connectors & Patch Cords</option>
+                        <option value="SPLITTERS">Optical Splitters</option>
+                        <option value="TOOLS">Field Tools</option>
+                        <option value="TESTING_EQUIPMENT">Testing Equipment</option>
+                        <option value="INSTALLATION_MATERIALS">Installation Materials</option>
+                        <option value="CONSUMABLES">Consumables</option>
+                        <option value="SAFETY_PPE">Safety & PPE</option>
+                        <option value="NETWORK_EQUIPMENT">Network Equipment</option>
+                        <option value="ELECTRICAL">Electrical</option>
+                        <option value="OTHER">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Unit *</label>
+                      <input value={materialUnit} onChange={(event) => setMaterialUnit(event.target.value)} placeholder="pcs, metres, rolls" className="w-full rounded border border-slate-300 px-3 py-2" required />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Unit Cost (KES)</label>
+                      <input type="number" min="0" step="0.01" value={materialUnitCost} onChange={(event) => setMaterialUnitCost(event.target.value)} className="w-full rounded border border-slate-300 px-3 py-2" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Opening Stock</label>
+                      <input type="number" min="0" step="0.01" value={materialInitialStock} onChange={(event) => setMaterialInitialStock(event.target.value)} className="w-full rounded border border-slate-300 px-3 py-2" />
+                    </div>
+                    {Number(materialInitialStock) > 0 && (
+                      <div className="sm:col-span-2">
+                        <label className="mb-1 block font-semibold text-slate-700">Opening Stock Warehouse *</label>
+                        <select value={materialWarehouseId} onChange={(event) => setMaterialWarehouseId(event.target.value)} className="w-full rounded border border-slate-300 bg-white px-3 py-2" required>
+                          <option value="">-- Select receiving warehouse --</option>
+                          {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} — {warehouse.name} ({warehouse.location})</option>)}
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Minimum Stock</label>
+                      <input type="number" min="0" step="0.01" value={materialMinimumStock} onChange={(event) => setMaterialMinimumStock(event.target.value)} className="w-full rounded border border-slate-300 px-3 py-2" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Reorder Level</label>
+                      <input type="number" min="0" step="0.01" value={materialReorderLevel} onChange={(event) => setMaterialReorderLevel(event.target.value)} className="w-full rounded border border-slate-300 px-3 py-2" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Maximum Stock</label>
+                      <input type="number" min="0" step="0.01" value={materialMaximumStock} onChange={(event) => setMaterialMaximumStock(event.target.value)} className="w-full rounded border border-slate-300 px-3 py-2" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Store Location</label>
+                      <input value={materialStoreLocation} onChange={(event) => setMaterialStoreLocation(event.target.value)} placeholder="e.g. Rack A-03" className="w-full rounded border border-slate-300 px-3 py-2" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-semibold text-slate-700">Supplier</label>
+                      <input value={materialSupplier} onChange={(event) => setMaterialSupplier(event.target.value)} className="w-full rounded border border-slate-300 px-3 py-2" />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-slate-100 pt-3">
+                    <label className="flex items-center gap-2 text-slate-700">
+                      <input type="checkbox" checked={materialIsSerialRequired} onChange={(event) => setMaterialIsSerialRequired(event.target.checked)} />
+                      Serial number required
+                    </label>
+                    <label className="flex items-center gap-2 text-slate-700">
+                      <input type="checkbox" checked={materialTracksSafaricom} onChange={(event) => setMaterialTracksSafaricom(event.target.checked)} />
+                      Safaricom asset tracking
+                    </label>
+                  </div>
+                  {warehouses.length === 0 && (
+                    <p className="rounded border border-amber-200 bg-amber-50 p-2.5 text-amber-800">
+                      No warehouse exists yet. You can create the material with zero opening stock, but must create a warehouse before receiving stock.
+                    </p>
+                  )}
+                  <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                    <button type="button" onClick={() => setShowCreateMaterialModal(false)} className="px-3 py-1.5 font-medium text-slate-600">Cancel</button>
+                    <button type="submit" disabled={creatingMaterial} className="rounded bg-[#0B2545] px-4 py-1.5 font-bold text-white disabled:opacity-60">
+                      {creatingMaterial ? 'Saving…' : 'Add Material'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -289,6 +507,13 @@ export const InventoryView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {balances.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">
+                      No stocked materials are recorded yet. Add a material to the catalog and enter its opening stock, or add it with zero stock and post a receipt.
+                    </td>
+                  </tr>
+                )}
                 {balances.map((b, idx) => {
                   const isLow = b.warehouseStock <= b.minimumStock;
                   return (
@@ -663,9 +888,9 @@ export const InventoryView: React.FC = () => {
                   onChange={(e) => setAdjustMaterialId(e.target.value)}
                   className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
                 >
-                  {balances.map((b) => (
-                    <option key={b.materialId} value={b.materialId}>
-                      {b.sku} — {b.materialName} ({b.warehouseStock} {b.unit})
+                  {catalogMaterials.map((material) => (
+                    <option key={material.id} value={material.id}>
+                      {material.sku} — {material.name} ({material.currentStock} {material.unit} in store)
                     </option>
                   ))}
                 </select>

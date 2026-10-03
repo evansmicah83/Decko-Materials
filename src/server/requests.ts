@@ -58,15 +58,15 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { status, teamId, projectId, priority, search, page, limit } = req.query;
 
   let query = `
-    SELECT mr.id, mr.request_number as requestNumber, mr.team_id as teamId,
-           t.team_code as teamCode, t.name as teamName,
-           mr.requester_id as requesterId, u.full_name as requesterName, u.email as requesterEmail,
-           mr.project_id as projectId, p.name as projectName, p.project_code as projectCode,
-           mr.site_name as siteName, mr.required_date as requiredDate, mr.priority,
-           mr.reason, mr.work_order_ref as workOrderRef, mr.status, mr.estimated_cost as estimatedCost,
-           mr.created_at as createdAt, mr.updated_at as updatedAt,
-           (SELECT count(*) FROM material_request_items mri WHERE mri.request_id = mr.id) as itemCount,
-           p_pay.payment_reference as paymentReference, p_pay.status as paymentStatus
+    SELECT mr.id, mr.request_number as "requestNumber", mr.team_id as "teamId",
+           t.team_code as "teamCode", t.name as "teamName",
+           mr.requester_id as "requesterId", u.full_name as "requesterName", u.email as "requesterEmail",
+           mr.project_id as "projectId", p.name as "projectName", p.project_code as "projectCode",
+           mr.site_name as "siteName", mr.required_date as "requiredDate", mr.priority,
+           mr.reason, mr.work_order_ref as "workOrderRef", mr.status, mr.estimated_cost as "estimatedCost",
+           mr.created_at as "createdAt", mr.updated_at as "updatedAt",
+           (SELECT count(*) FROM material_request_items mri WHERE mri.request_id = mr.id) as "itemCount",
+           p_pay.payment_reference as "paymentReference", p_pay.status as "paymentStatus"
     FROM material_requests mr
     JOIN teams t ON mr.team_id = t.id
     JOIN users u ON mr.requester_id = u.id
@@ -138,14 +138,14 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 // GET /api/v1/material-requests/:id (Full Request Details)
 router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   const request = await db.prepare(`
-    SELECT mr.id, mr.request_number as requestNumber, mr.team_id as teamId,
-           t.team_code as teamCode, t.name as teamName, t.assigned_area as teamArea,
-           mr.requester_id as requesterId, u.full_name as requesterName, u.email as requesterEmail,
-           u.phone_number as requesterPhone, u.employee_id as requesterEmployeeId,
-           mr.project_id as projectId, p.name as projectName, p.project_code as projectCode, p.client as projectClient,
-           mr.site_name as siteName, mr.required_date as requiredDate, mr.priority,
-           mr.reason, mr.work_order_ref as workOrderRef, mr.notes, mr.status,
-           mr.estimated_cost as estimatedCost, mr.created_at as createdAt, mr.updated_at as updatedAt
+    SELECT mr.id, mr.request_number as "requestNumber", mr.team_id as "teamId",
+           t.team_code as "teamCode", t.name as "teamName", t.assigned_area as "teamArea",
+           mr.requester_id as "requesterId", u.full_name as "requesterName", u.email as "requesterEmail",
+           u.phone_number as "requesterPhone", u.employee_id as "requesterEmployeeId",
+           mr.project_id as "projectId", p.name as "projectName", p.project_code as "projectCode", p.client as "projectClient",
+           mr.site_name as "siteName", mr.required_date as "requiredDate", mr.priority,
+           mr.reason, mr.work_order_ref as "workOrderRef", mr.notes, mr.status,
+           mr.estimated_cost as "estimatedCost", mr.created_at as "createdAt", mr.updated_at as "updatedAt"
     FROM material_requests mr
     JOIN teams t ON mr.team_id = t.id
     JOIN users u ON mr.requester_id = u.id
@@ -159,13 +159,13 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   // Get items
   const items = await db.prepare(`
-    SELECT mri.id, mri.material_id as materialId, m.sku, m.name as materialName,
-           m.category, mri.quantity_requested as quantityRequested,
-           mri.quantity_approved as quantityApproved, mri.quantity_issued as quantityIssued,
-           mri.quantity_remaining as quantityRemaining, mri.unit, mri.reason,
-           m.current_stock as currentWarehouseStock, m.unit_cost as unitCost,
-           m.is_serial_required as isSerialRequired, m.requires_safaricom_tracking as requiresSafaricomTracking,
-           m.store_location as storeLocation
+    SELECT mri.id, mri.material_id as "materialId", m.sku, m.name as "materialName",
+           m.category, mri.quantity_requested as "quantityRequested",
+           mri.quantity_approved as "quantityApproved", mri.quantity_issued as "quantityIssued",
+           mri.quantity_remaining as "quantityRemaining", mri.unit, mri.reason,
+           m.current_stock as "currentWarehouseStock", m.unit_cost as "unitCost",
+           m.is_serial_required as "isSerialRequired", m.requires_safaricom_tracking as "requiresSafaricomTracking",
+           m.store_location as "storeLocation"
     FROM material_request_items mri
     JOIN materials m ON mri.material_id = m.id
     WHERE mri.request_id = ?
@@ -173,9 +173,9 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   // Get approvals history
   const approvals = await db.prepare(`
-    SELECT a.id, a.approver_id as approverId, u.full_name as approverName, u.role as approverRole,
-           a.action, a.previous_status as previousStatus, a.new_status as newStatus,
-           a.comment, a.created_at as createdAt
+    SELECT a.id, a.approver_id as "approverId", u.full_name as "approverName", u.role as "approverRole",
+           a.action, a.previous_status as "previousStatus", a.new_status as "newStatus",
+           a.comment, a.created_at as "createdAt"
     FROM approvals a
     JOIN users u ON a.approver_id = u.id
     WHERE a.request_id = ?
@@ -184,9 +184,9 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   // Get payment info
   const payment = await db.prepare(`
-    SELECT p.id, p.accountant_id as accountantId, u.full_name as accountantName,
-           p.amount, p.payment_method as paymentMethod, p.payment_reference as paymentReference,
-           p.payment_date as paymentDate, p.receipt_evidence as receiptEvidence,
+    SELECT p.id, p.accountant_id as "accountantId", u.full_name as "accountantName",
+           p.amount, p.payment_method as "paymentMethod", p.payment_reference as "paymentReference",
+           p.payment_date as "paymentDate", p.receipt_evidence as "receiptEvidence",
            p.notes, p.status
     FROM payments p
     JOIN users u ON p.accountant_id = u.id
@@ -195,9 +195,9 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   // Get material issues & items
   const issues = await db.prepare(`
-    SELECT mi.id, mi.store_officer_id as storeOfficerId, u.full_name as storeOfficerName,
-           mi.recipient_name as recipientName, mi.recipient_signature as recipientSignature,
-           mi.is_partial as isPartial, mi.issued_at as issuedAt, mi.received_at as receivedAt
+    SELECT mi.id, mi.store_officer_id as "storeOfficerId", u.full_name as "storeOfficerName",
+           mi.recipient_name as "recipientName", mi.recipient_signature as "recipientSignature",
+           mi.is_partial as "isPartial", mi.issued_at as "issuedAt", mi.received_at as "receivedAt"
     FROM material_issues mi
     JOIN users u ON mi.store_officer_id = u.id
     WHERE mi.request_id = ?
@@ -206,9 +206,9 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   for (const issue of issues) {
     issue.items = await db.prepare(`
-      SELECT mii.id, mii.material_id as materialId, m.name as materialName, m.sku,
-             mii.quantity_issued as quantityIssued, mii.serial_number as serialNumber,
-             mii.tracked_unit_id as trackedUnitId
+      SELECT mii.id, mii.material_id as "materialId", m.name as "materialName", m.sku,
+             mii.quantity_issued as "quantityIssued", mii.serial_number as "serialNumber",
+             mii.tracked_unit_id as "trackedUnitId"
       FROM material_issue_items mii
       JOIN materials m ON mii.material_id = m.id
       WHERE mii.issue_id = ?
@@ -217,8 +217,8 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   // Get returns
   const returns = await db.prepare(`
-    SELECT mr.id, mr.receiver_id as receiverId, u.full_name as receiverName,
-           mr.status, mr.created_at as createdAt
+    SELECT mr.id, mr.receiver_id as "receiverId", u.full_name as "receiverName",
+           mr.status, mr.created_at as "createdAt"
     FROM material_returns mr
     JOIN users u ON mr.receiver_id = u.id
     WHERE mr.request_id = ?
@@ -227,8 +227,8 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   for (const ret of returns) {
     ret.items = await db.prepare(`
-      SELECT mri.id, mri.material_id as materialId, m.name as materialName, m.sku,
-             mri.quantity, mri.serial_number as serialNumber, mri.condition, mri.notes
+      SELECT mri.id, mri.material_id as "materialId", m.name as "materialName", m.sku,
+             mri.quantity, mri.serial_number as "serialNumber", mri.condition, mri.notes
       FROM material_return_items mri
       JOIN materials m ON mri.material_id = m.id
       WHERE mri.return_id = ?
@@ -237,7 +237,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   // Get team current stock for context
   const teamStock = await db.prepare(`
-    SELECT ts.material_id as materialId, m.name as materialName, m.sku, ts.current_stock as currentStock, m.unit
+    SELECT ts.material_id as "materialId", m.name as "materialName", m.sku, ts.current_stock as "currentStock", m.unit
     FROM team_stocks ts
     JOIN materials m ON ts.material_id = m.id
     WHERE ts.team_id = ?
@@ -245,9 +245,9 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
   // Get immutable audit log for this request
   const auditLogs = await db.prepare(`
-    SELECT al.id, al.user_id as userId, u.full_name as userName, al.action,
-           al.previous_value as previousValue, al.new_value as newValue,
-           al.reason, al.created_at as createdAt
+    SELECT al.id, al.user_id as "userId", u.full_name as "userName", al.action,
+           al.previous_value as "previousValue", al.new_value as "newValue",
+           al.reason, al.created_at as "createdAt"
     FROM audit_logs al
     LEFT JOIN users u ON al.user_id = u.id
     WHERE al.entity = 'MaterialRequest' AND al.entity_id = ?
@@ -273,12 +273,72 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { teamId, projectId, siteName, requiredDate, priority, reason, workOrderRef, notes, items, isDraft } = req.body;
 
-  if (['FIELD_TECHNICIAN', 'FIELD_TEAM_LEADER'].includes(req.user?.role || '') && req.user?.teamId !== teamId) {
+  const isFieldUser = ['FIELD_TECHNICIAN', 'FIELD_TEAM_LEADER'].includes(req.user?.role || '');
+  if (isFieldUser && (!req.user?.teamId || req.user.teamId !== teamId)) {
     return res.status(403).json({ success: false, message: 'You can only create requests for your assigned team.', code: 'TEAM_ACCESS_DENIED' });
   }
 
-  if (!teamId || !projectId || !requiredDate || !reason || !items || !Array.isArray(items) || items.length === 0) {
+  if (typeof teamId !== 'string' || !teamId ||
+      typeof projectId !== 'string' || !projectId ||
+      typeof requiredDate !== 'string' || !requiredDate ||
+      typeof reason !== 'string' || !reason.trim() ||
+      !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ success: false, message: 'Please provide team, project, required date, reason, and at least one material item' });
+  }
+
+  if (!Number.isFinite(Date.parse(requiredDate))) {
+    return res.status(400).json({ success: false, message: 'Required date must be a valid date.' });
+  }
+
+  const allowedPriorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+  if (priority !== undefined && !allowedPriorities.includes(priority)) {
+    return res.status(400).json({ success: false, message: 'Priority must be LOW, MEDIUM, HIGH, or CRITICAL.' });
+  }
+
+  const team = await db.prepare('SELECT id, project_id, status FROM teams WHERE id = ?').get(teamId) as
+    { id: string; project_id: string | null; status: string } | undefined;
+  if (!team || team.status !== 'ACTIVE') {
+    return res.status(400).json({ success: false, message: 'Select an active field team.', code: 'INVALID_TEAM' });
+  }
+  if (team.project_id !== projectId) {
+    return res.status(400).json({
+      success: false,
+      message: 'The selected project must be the project assigned to the field team.',
+      code: 'TEAM_PROJECT_MISMATCH'
+    });
+  }
+  if (!await db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId)) {
+    return res.status(400).json({ success: false, message: 'The selected project does not exist.', code: 'INVALID_PROJECT' });
+  }
+  if (!req.user?.id) {
+    return res.status(401).json({ success: false, message: 'A valid authenticated requester is required.' });
+  }
+
+  const validatedItems: Array<{ materialId: string; quantity: number; unit: string; reason: string | null; unitCost: number }> = [];
+  for (const item of items) {
+    if (!item || typeof item.materialId !== 'string' || !item.materialId) {
+      return res.status(400).json({ success: false, message: 'Each request item must reference a material.' });
+    }
+    const quantity = Number(item.quantityRequested);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return res.status(400).json({ success: false, message: 'Requested material quantities must be positive numbers.' });
+    }
+    const material = await db.prepare('SELECT unit, unit_cost FROM materials WHERE id = ? AND is_active = 1').get(item.materialId) as
+      { unit: string; unit_cost: number } | undefined;
+    if (!material) {
+      return res.status(400).json({
+        success: false,
+        message: `Material ${item.materialId} is unavailable or inactive.`,
+        code: 'INVALID_MATERIAL'
+      });
+    }
+    validatedItems.push({
+      materialId: item.materialId,
+      quantity,
+      unit: material.unit,
+      reason: typeof item.reason === 'string' && item.reason.trim() ? item.reason.trim() : null,
+      unitCost: Number(material.unit_cost) || 0
+    });
   }
 
   const requestId = `req-${uuidv4().slice(0, 8)}`;
@@ -287,11 +347,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const initialStatus = isDraft ? 'DRAFT' : 'SUBMITTED';
 
   let estimatedTotal = 0;
-  for (const item of items) {
-    const mat = await db.prepare('SELECT unit_cost FROM materials WHERE id = ?').get(item.materialId) as { unit_cost: number };
-    const cost = (mat?.unit_cost || 0) * (Number(item.quantityRequested) || 0);
-    estimatedTotal += cost;
-  }
+  for (const item of validatedItems) estimatedTotal += item.unitCost * item.quantity;
 
   await db.exec('BEGIN TRANSACTION');
   try {
@@ -301,7 +357,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
         priority, reason, work_order_ref, notes, status, estimated_cost, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      requestId, requestNumber, teamId, req.user?.id || 'usr-lead', projectId, siteName || null,
+      requestId, requestNumber, teamId, req.user.id, projectId, siteName || null,
       requiredDate, priority || 'MEDIUM', reason.trim(), workOrderRef || null,
       notes || null, initialStatus, estimatedTotal, now, now
     );
@@ -313,9 +369,8 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    for (const item of items) {
-      const mat = await db.prepare('SELECT unit FROM materials WHERE id = ?').get(item.materialId) as { unit: string };
-      const qty = Number(item.quantityRequested);
+    for (const item of validatedItems) {
+      const qty = item.quantity;
       await insertItem.run(
         `item-${uuidv4().slice(0, 8)}`,
         requestId,
@@ -324,8 +379,8 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
         0.0,
         0.0,
         qty,
-        item.unit || mat?.unit || 'pcs',
-        item.reason || null
+        item.unit,
+        item.reason
       );
     }
 
@@ -757,7 +812,7 @@ router.post('/:id/issue', authenticateToken, requireRole(['SUPER_ADMIN', 'STORE_
     }
 
     // Check if any items still have remaining quantity to issue
-    const allRemaining = await db.prepare('SELECT sum(quantity_remaining) as totalRem FROM material_request_items WHERE request_id = ?').get(request.id) as { totalRem: number };
+    const allRemaining = await db.prepare('SELECT sum(quantity_remaining) as "totalRem" FROM material_request_items WHERE request_id = ?').get(request.id) as { totalRem: number };
     const totalRemaining = Number(allRemaining?.totalRem || 0);
 
     let nextStatus = 'ISSUED';

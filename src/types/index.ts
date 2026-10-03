@@ -138,6 +138,26 @@ export interface Material {
   isActive: boolean | number;
 }
 
+export interface CreateMaterialPayload {
+  sku: string;
+  name: string;
+  category: MaterialCategory;
+  description?: string;
+  unit: string;
+  minimumStock?: number;
+  reorderLevel?: number;
+  maximumStock?: number;
+  storeLocation?: string;
+  isSerialRequired?: boolean;
+  isBarcodeRequired?: boolean;
+  isScanningMandatory?: boolean;
+  requiresSafaricomTracking?: boolean;
+  supplier?: string;
+  unitCost?: number;
+  initialStock?: number;
+  warehouseId?: string;
+}
+
 export interface TrackedUnit {
   id: string;
   serialNumber: string;
