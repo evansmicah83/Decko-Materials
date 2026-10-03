@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      // Suppress Vite HMR WebSocket in sandboxed preview iframe per environment specification
+      (function() {
+        window.addEventListener('unhandledrejection', function(e) {
+          if (e.reason && (String(e.reason).includes('WebSocket') || e.reason?.message?.includes('WebSocket'))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+        window.addEventListener('error', function(e) {
+          if (e.message && (e.message.includes('WebSocket') || e.message.includes('websocket'))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+
+        var NativeWebSocket = window.WebSocket;
+        if (NativeWebSocket) {
+          window.WebSocket = function(url, protocols) {
+            if (protocols === 'vite-hmr' || (typeof url === 'string' && url.includes('vite-hmr'))) {
+              return {
+                readyState: 1,
+                send: function() {},
+                close: function() {},
+                addEventListener: function(type, cb) {
+                  if (type === 'open') {
+                    setTimeout(cb, 0);
+                  }
+                },
+                removeEventListener: function() {},
+                dispatchEvent: function() { return true; }
+              };
+            }
+            return new NativeWebSocket(url, protocols);
+          };
+          window.WebSocket.prototype = NativeWebSocket.prototype;
+        }
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/decko-logo.svg" />
+    <title>Decko Materials</title>
+    <meta name="description" content="Decko Africa Field Materials Management System - digitizing field material requests, approvals, payment verification, store issuance, QR scanning, team stock, consumption, and audit trails." />
+    <meta property="og:title" content="Decko Materials" />
+    <meta property="og:description" content="Decko Africa Field Materials Management System - digitizing field material requests, approvals, payment verification, store issuance, QR scanning, team stock, consumption, and audit trails." />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#0B2545" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

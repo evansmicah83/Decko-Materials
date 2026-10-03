@@ -1,0 +1,459 @@
+// Decko Africa Ltd. - Field Materials Management System
+// Prisma Schema Definition
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  FIELD_TEAM_LEADER
+  FIELD_TECHNICIAN
+  DISPATCHER
+  PROJECT_MANAGER
+  ACCOUNTANT
+  STORE_OFFICER
+  PROCUREMENT_OFFICER
+  AUDITOR
+  VIEWER
+}
+
+enum RequestStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  CLARIFICATION_REQUIRED
+  REJECTED
+  APPROVED
+  PAYMENT_PENDING
+  PAYMENT_PROCESSING
+  PAID
+  READY_FOR_ISSUE
+  PARTIALLY_ISSUED
+  ISSUED
+  RECEIVED
+  IN_USE
+  RETURN_PENDING
+  PARTIALLY_RETURNED
+  RETURNED
+  CANCELLED
+  COMPLETED
+}
+
+enum MaterialCategory {
+  FIBRE_CABLE
+  CONNECTORS
+  SPLITTERS
+  TOOLS
+  TESTING_EQUIPMENT
+  INSTALLATION_MATERIALS
+  CONSUMABLES
+  SAFETY_PPE
+  NETWORK_EQUIPMENT
+  ELECTRICAL
+  OTHER
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum InventoryTransactionType {
+  RECEIPT
+  ISSUE
+  RETURN
+  TRANSFER
+  ADJUSTMENT
+  DAMAGE
+  LOSS
+  DISPOSAL
+  PURCHASE
+}
+
+enum ItemCondition {
+  GOOD
+  DAMAGED
+  FAULTY
+  MISSING_PARTS
+  UNUSABLE
+}
+
+enum ToolStatus {
+  IN_STORE
+  ISSUED
+  IN_TRANSIT
+  WITH_TEAM
+  IN_USE
+  RETURNED
+  DAMAGED
+  LOST
+  DISPOSED
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  fullName     String
+  phoneNumber  String?
+  employeeId   String        @unique
+  role         Role          @default(FIELD_TECHNICIAN)
+  department   String?
+  isActive     Boolean       @default(true)
+  teamId       String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  team                Team?                @relation("TeamMembers", fields: [teamId], references: [id])
+  ledTeams            Team[]               @relation("TeamLeader")
+  materialRequests    MaterialRequest[]    @relation("RequestedByUser")
+  reviewedRequests    Approval[]           @relation("ApproverUser")
+  paymentsHandled     Payment[]            @relation("AccountantUser")
+  materialIssues      MaterialIssue[]      @relation("StoreOfficerUser")
+  materialReturns     MaterialReturn[]     @relation("ReturnReceivedByUser")
+  consumptionsLogged  MaterialConsumption[] @relation("ConsumptionLoggedByUser")
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+}
+
+model Team {
+  id          String   @id @default(uuid())
+  teamCode    String   @unique // e.g. FTTH-001
+  name        String   // e.g. Nairobi FTTH Team 1
+  leaderId    String?
+  leader      User?    @relation("TeamLeader", fields: [leaderId], references: [id])
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id])
+  regionId    String?
+  region      Region?  @relation(fields: [regionId], references: [id])
+  assignedArea String?
+  status      String   @default("ACTIVE")
+  contactInfo String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members          User[]            @relation("TeamMembers")
+  materialRequests MaterialRequest[]
+  teamStocks       TeamStock[]
+  consumptions     MaterialConsumption[]
+  returns          MaterialReturn[]
+}
+
+model Region {
+  id        String    @id @default(uuid())
+  name      String    @unique // Nairobi, Central, Coast, Rift Valley, Western
+  code      String    @unique
+  teams     Team[]
+  sites     Site[]
+  projects  Project[]
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  projectCode String    @unique // e.g. PRJ-NBI-FTTH
+  name        String    // e.g. Nairobi FTTH Expansion
+  client      String    @default("Safaricom PLC")
+  regionId    String?
+  region      Region?   @relation(fields: [regionId], references: [id])
+  status      String    @default("IN_PROGRESS")
+  budget      Decimal   @default(0.00)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  teams            Team[]
+  sites            Site[]
+  materialRequests MaterialRequest[]
+}
+
+model Site {
+  id          String   @id @default(uuid())
+  siteCode    String   @unique
+  name        String
+  regionId    String?
+  region      Region?  @relation(fields: [regionId], references: [id])
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id])
+  address     String?
+  coordinates String?
+}
+
+model Warehouse {
+  id        String   @id @default(uuid())
+  code      String   @unique // e.g. WH-NBI-CENTRAL
+  name      String   // Nairobi Central Store (Kigwa Rd)
+  location  String
+  manager   String?
+  balances  InventoryBalance[]
+}
+
+model Material {
+  id                       String           @id @default(uuid())
+  sku                      String           @unique // e.g. MAT-CBL-001
+  name                     String
+  category                 MaterialCategory @default(FIBRE_CABLE)
+  description              String?
+  unit                     String           @default("pcs") // m, pcs, roll, set
+  currentStock             Decimal          @default(0.00)
+  minimumStock             Decimal          @default(10.00)
+  reorderLevel             Decimal          @default(20.00)
+  maximumStock             Decimal          @default(1000.00)
+  storeLocation            String?          // e.g. Shelf A-03
+  isSerialRequired         Boolean          @default(false)
+  isBarcodeRequired        Boolean          @default(false)
+  isScanningMandatory      Boolean          @default(false)
+  requiresSafaricomTracking Boolean          @default(false)
+  supplier                 String?
+  unitCost                 Decimal          @default(0.00)
+  isActive                 Boolean          @default(true)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  requestItems       MaterialRequestItem[]
+  inventoryBalances  InventoryBalance[]
+  transactions       InventoryTransaction[]
+  trackedUnits       TrackedUnit[]
+  teamStocks         TeamStock[]
+}
+
+model TrackedUnit {
+  id              String     @id @default(uuid())
+  serialNumber    String     @unique
+  barcode         String?
+  materialId      String
+  material        Material   @relation(fields: [materialId], references: [id])
+  status          ToolStatus @default(IN_STORE)
+  currentLocation String     @default("Warehouse")
+  currentTeamId   String?
+  custodianName   String?
+  safaricomTag    String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  issueItems      MaterialIssueItem[]
+  returnItems     MaterialReturnItem[]
+}
+
+model InventoryBalance {
+  id          String    @id @default(uuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  materialId  String
+  material    Material  @relation(fields: [materialId], references: [id])
+  quantity    Decimal   @default(0.00)
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([warehouseId, materialId])
+}
+
+model TeamStock {
+  id             String   @id @default(uuid())
+  teamId         String
+  team           Team     @relation(fields: [teamId], references: [id])
+  materialId     String
+  material       Material @relation(fields: [materialId], references: [id])
+  currentStock   Decimal  @default(0.00)
+  totalIssued    Decimal  @default(0.00)
+  totalConsumed  Decimal  @default(0.00)
+  totalReturned  Decimal  @default(0.00)
+  totalDamaged   Decimal  @default(0.00)
+  totalLost      Decimal  @default(0.00)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([teamId, materialId])
+}
+
+model InventoryTransaction {
+  id            String                   @id @default(uuid())
+  materialId    String
+  material      Material                 @relation(fields: [materialId], references: [id])
+  type          InventoryTransactionType
+  quantity      Decimal
+  previousStock Decimal
+  newStock      Decimal
+  source        String?
+  destination   String?
+  reference     String?                  // e.g. REQ-2026-000123 or PO-109
+  reason        String?
+  userId        String?
+  createdAt     DateTime                 @default(now())
+}
+
+model MaterialRequest {
+  id           String        @id @default(uuid())
+  requestNumber String       @unique // REQ-2026-000001
+  teamId       String
+  team         Team          @relation(fields: [teamId], references: [id])
+  requesterId  String
+  requester    User          @relation("RequestedByUser", fields: [requesterId], references: [id])
+  projectId    String
+  project      Project       @relation(fields: [projectId], references: [id])
+  siteName     String?
+  requiredDate DateTime
+  priority     Priority      @default(MEDIUM)
+  reason       String
+  workOrderRef String?
+  notes        String?
+  status       RequestStatus @default(SUBMITTED)
+  estimatedCost Decimal      @default(0.00)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  items        MaterialRequestItem[]
+  approvals    Approval[]
+  payment      Payment?
+  issues       MaterialIssue[]
+  returns      MaterialReturn[]
+}
+
+model MaterialRequestItem {
+  id                String          @id @default(uuid())
+  requestId         String
+  request           MaterialRequest @relation(fields: [requestId], references: [id])
+  materialId        String
+  material          Material        @relation(fields: [materialId], references: [id])
+  quantityRequested Decimal
+  quantityApproved  Decimal         @default(0.00)
+  quantityIssued    Decimal         @default(0.00)
+  quantityRemaining Decimal         @default(0.00)
+  unit              String
+  reason            String?
+}
+
+model Approval {
+  id             String          @id @default(uuid())
+  requestId      String
+  request        MaterialRequest @relation(fields: [requestId], references: [id])
+  approverId     String
+  approver       User            @relation("ApproverUser", fields: [approverId], references: [id])
+  action         String          // APPROVED, REJECTED, CLARIFICATION_REQUESTED
+  previousStatus RequestStatus
+  newStatus      RequestStatus
+  comment        String?
+  createdAt      DateTime        @default(now())
+}
+
+model Payment {
+  id               String          @id @default(uuid())
+  requestId        String          @unique
+  request          MaterialRequest @relation(fields: [requestId], references: [id])
+  accountantId     String
+  accountant       User            @relation("AccountantUser", fields: [accountantId], references: [id])
+  amount           Decimal
+  paymentMethod    String          // M-PESA, BANK_EFT, PETTY_CASH, CORPORATE_PO
+  paymentReference String          // e.g. MPESA-QKD92810
+  paymentDate      DateTime        @default(now())
+  receiptEvidence  String?         // URL or file ref
+  notes            String?
+  status           String          @default("CONFIRMED")
+}
+
+model MaterialIssue {
+  id               String          @id @default(uuid())
+  requestId        String
+  request          MaterialRequest @relation(fields: [requestId], references: [id])
+  storeOfficerId   String
+  storeOfficer     User            @relation("StoreOfficerUser", fields: [storeOfficerId], references: [id])
+  recipientName    String
+  recipientId      String?
+  recipientSignature String?       // Base64 signature
+  isPartial        Boolean         @default(false)
+  issuedAt         DateTime        @default(now())
+  receivedAt       DateTime?
+
+  items            MaterialIssueItem[]
+}
+
+model MaterialIssueItem {
+  id              String        @id @default(uuid())
+  issueId         String
+  issue           MaterialIssue @relation(fields: [issueId], references: [id])
+  materialId      String
+  quantityIssued  Decimal
+  trackedUnitId   String?
+  trackedUnit     TrackedUnit?  @relation(fields: [trackedUnitId], references: [id])
+  serialNumber    String?
+}
+
+model MaterialConsumption {
+  id               String    @id @default(uuid())
+  teamId           String
+  team             Team      @relation(fields: [teamId], references: [id])
+  materialId       String
+  quantityConsumed Decimal
+  workOrder        String?
+  loggedById       String
+  loggedBy         User      @relation("ConsumptionLoggedByUser", fields: [loggedById], references: [id])
+  notes            String?
+  createdAt        DateTime  @default(now())
+}
+
+model MaterialReturn {
+  id             String          @id @default(uuid())
+  requestId      String?
+  request        MaterialRequest? @relation(fields: [requestId], references: [id])
+  teamId         String
+  team           Team            @relation(fields: [teamId], references: [id])
+  receiverId     String
+  receiver       User            @relation("ReturnReceivedByUser", fields: [receiverId], references: [id])
+  status         String          @default("ACCEPTED")
+  createdAt      DateTime        @default(now())
+
+  items          MaterialReturnItem[]
+}
+
+model MaterialReturnItem {
+  id             String         @id @default(uuid())
+  returnId       String
+  returnDoc      MaterialReturn @relation(fields: [returnId], references: [id])
+  materialId     String
+  quantity       Decimal
+  trackedUnitId  String?
+  trackedUnit    TrackedUnit?   @relation(fields: [trackedUnitId], references: [id])
+  serialNumber   String?
+  condition      ItemCondition  @default(GOOD)
+  notes          String?
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  type      String   // APPROVAL, PAYMENT, ISSUE, STOCK, RETURN
+  link      String?  // /requests/REQ-2026-000001
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String   // e.g. REQUEST_CREATED, REQUEST_APPROVED, MATERIAL_ISSUED
+  entity     String   // MaterialRequest, Inventory, User
+  entityId   String
+  ipAddress  String?
+  userAgent  String?
+  previousValue String? // JSON
+  newValue   String?    // JSON
+  reason     String?
+  createdAt  DateTime @default(now())
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}

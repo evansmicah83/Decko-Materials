@@ -1,0 +1,6 @@
+{
+  "name": "Decko Materials",
+  "description": "Decko Africa Field Materials Management System - digitizing field material requests, approvals, payment verification, store issuance, QR scanning, team stock, consumption, and audit trails.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,41 @@
+<svg width="520" height="118" viewBox="0 0 520 118" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="deckoBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#08558A" />
+      <stop offset="100%" stop-color="#012D4C" />
+    </linearGradient>
+    <linearGradient id="deckoYellow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FDD835" />
+      <stop offset="100%" stop-color="#D99805" />
+    </linearGradient>
+    <filter id="kShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="2" dy="3" stdDeviation="1" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- D -->
+  <path d="M38 18 H 108 C 114 18, 118 22, 115 28 L 112 34 C 110 37, 106 39, 102 39 H 48 L 44 39 Z" fill="url(#deckoBlue)" />
+  <path d="M 33 28 L 22 72 C 20 78, 25 84, 32 84 H 96 C 112 84, 124 72, 127 58 C 129 48, 124 40, 116 36 L 107 46 C 110 49, 112 54, 110 60 C 108 68, 102 72, 92 72 H 42 L 49 42 H 30 Z" fill="url(#deckoBlue)" />
+
+  <!-- E -->
+  <path d="M 142 18 H 222 C 228 18, 230 22, 227 28 L 225 33 C 223 37, 218 39, 214 39 H 152 Z" fill="url(#deckoBlue)" />
+  <path d="M 137 28 L 126 72 C 124 78, 129 84, 136 84 H 212 C 218 84, 221 80, 223 74 L 225 69 C 226 65, 222 63, 217 63 H 146 L 149 53 H 198 C 204 53, 206 49, 208 44 L 209 41 C 210 38, 207 36, 202 36 H 153 L 155 28 Z" fill="url(#deckoBlue)" />
+
+  <!-- C -->
+  <path d="M 246 18 H 324 C 330 18, 333 22, 331 28 L 329 33 C 327 37, 323 39, 318 39 H 258 Z" fill="url(#deckoBlue)" />
+  <path d="M 241 28 L 230 72 C 228 78, 233 84, 240 84 H 312 C 318 84, 321 80, 323 74 L 325 69 C 326 65, 322 63, 317 63 H 250 L 257 36 H 238 Z" fill="url(#deckoBlue)" />
+
+  <!-- K (Yellow) -->
+  <g filter="url(#kShadow)">
+    <path d="M 353 18 L 337 84 H 356 L 372 18 Z" fill="url(#deckoYellow)" />
+    <path d="M 358 50 L 398 18 H 418 L 373 54 Z" fill="url(#deckoYellow)" />
+    <path d="M 368 47 L 406 84 H 426 L 382 43 Z" fill="url(#deckoYellow)" />
+  </g>
+
+  <!-- O -->
+  <path d="M 438 18 H 502 C 516 18, 524 28, 522 42 L 521 46 H 506 C 507 38, 503 33, 495 33 H 448 L 444 39 H 433 Z" fill="url(#deckoBlue)" />
+  <path d="M 433 28 L 422 64 C 419 76, 427 84, 439 84 H 493 C 507 84, 517 74, 520 60 L 521 54 H 506 C 504 64, 498 69, 489 69 H 438 L 445 42 H 426 Z" fill="url(#deckoBlue)" />
+
+  <!-- Tagline -->
+  <text x="518" y="108" text-anchor="end" fill="#04446F" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="19" letter-spacing="2.8">CONNECTING AFRICA</text>
+</svg>
