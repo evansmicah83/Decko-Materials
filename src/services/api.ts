@@ -1,6 +1,17 @@
 import { MaterialRequest, Material, InventoryBalance, InventoryTransaction, TrackedUnit, Team, Project, Warehouse, AppNotification, AuditLogRecord } from '../types';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '');
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+const API_BASE = (configuredApiBase || '/api/v1').replace(/\/+$/, '');
+const apiBaseIsValidForProduction = (() => {
+  if (!import.meta.env.PROD) return true;
+  if (!configuredApiBase) return false;
+  try {
+    const apiUrl = new URL(configuredApiBase);
+    return apiUrl.protocol === 'https:' && apiUrl.pathname.replace(/\/+$/, '').endsWith('/api/v1');
+  } catch {
+    return false;
+  }
+})();
 
 export function getStoredToken(): string | null {
   return localStorage.getItem('decko_token');
@@ -15,6 +26,10 @@ export function setStoredToken(token: string | null) {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  if (!apiBaseIsValidForProduction) {
+    throw new Error('The API is not configured for this production deployment. Set VITE_API_BASE_URL in Vercel to your HTTPS backend URL ending in /api/v1, then redeploy.');
+  }
+
   const token = getStoredToken();
   const headers = new Headers(options.headers || {});
 
@@ -26,12 +41,22 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers
+    });
+  } catch {
+    throw new Error(`Unable to reach the API at ${API_BASE}. Check that the backend is running and allows requests from this website.`);
+  }
 
-  const data = await res.json().catch(() => ({ success: false, message: 'Server connection error' }));
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new Error(`The API returned a non-JSON response (HTTP ${res.status}). Check that VITE_API_BASE_URL points to the Express backend, not the Vercel frontend.`);
+  }
+
+  const data = await res.json();
 
   if (!res.ok || data.success === false) {
     throw new Error(data.message || `Request failed with status ${res.status}`);
