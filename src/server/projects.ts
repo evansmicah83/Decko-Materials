@@ -63,16 +63,16 @@ async function resolveRegionId(name: string): Promise<string> {
 // GET /api/v1/projects
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const projects = await db.prepare(`
-    SELECT p.id, p.project_code as projectCode, p.name, p.network_type as networkType, p.client,
-           p.region_id as regionId, r.name as regionName,
-           p.status, p.budget, p.contract_start_date as contractStartDate,
-           p.contract_end_date as contractEndDate, p.created_at as createdAt,
-           (SELECT count(*) FROM teams WHERE project_id = p.id) as teamCount,
+    SELECT p.id, p.project_code as "projectCode", p.name, p.network_type as "networkType", p.client,
+           p.region_id as "regionId", r.name as "regionName",
+           p.status, p.budget, p.contract_start_date as "contractStartDate",
+           p.contract_end_date as "contractEndDate", p.created_at as "createdAt",
+           (SELECT count(*) FROM teams WHERE project_id = p.id) as "teamCount",
            (SELECT count(DISTINCT up.user_id) FROM user_projects up
             JOIN users u ON u.id = up.user_id AND u.is_active = 1
-            WHERE up.project_id = p.id) as staffCount,
-           (SELECT count(*) FROM material_requests WHERE project_id = p.id) as requestCount,
-           (SELECT COALESCE(sum(estimated_cost), 0) FROM material_requests WHERE project_id = p.id) as totalMaterialCost
+            WHERE up.project_id = p.id) as "staffCount",
+           (SELECT count(*) FROM material_requests WHERE project_id = p.id) as "requestCount",
+           (SELECT COALESCE(sum(estimated_cost), 0) FROM material_requests WHERE project_id = p.id) as "totalMaterialCost"
     FROM projects p
     LEFT JOIN regions r ON p.region_id = r.id
     ORDER BY p.name ASC
@@ -153,16 +153,16 @@ router.post('/', authenticateToken, requireRole(managementRoles), async (req: Au
   });
 
   const project = await db.prepare(`
-    SELECT p.id, p.project_code as projectCode, p.name, p.network_type as networkType,
-           p.client, p.region_id as regionId, r.name as regionName, p.status, p.budget,
-           p.contract_start_date as contractStartDate, p.contract_end_date as contractEndDate,
-           p.created_at as createdAt,
-           (SELECT count(*) FROM teams WHERE project_id = p.id) as teamCount,
+    SELECT p.id, p.project_code as "projectCode", p.name, p.network_type as "networkType",
+           p.client, p.region_id as "regionId", r.name as "regionName", p.status, p.budget,
+           p.contract_start_date as "contractStartDate", p.contract_end_date as "contractEndDate",
+           p.created_at as "createdAt",
+           (SELECT count(*) FROM teams WHERE project_id = p.id) as "teamCount",
            (SELECT count(DISTINCT up.user_id) FROM user_projects up
             JOIN users u ON u.id = up.user_id AND u.is_active = 1
-            WHERE up.project_id = p.id) as staffCount,
-           (SELECT count(*) FROM material_requests WHERE project_id = p.id) as requestCount,
-           (SELECT COALESCE(sum(estimated_cost), 0) FROM material_requests WHERE project_id = p.id) as totalMaterialCost
+            WHERE up.project_id = p.id) as "staffCount",
+           (SELECT count(*) FROM material_requests WHERE project_id = p.id) as "requestCount",
+           (SELECT COALESCE(sum(estimated_cost), 0) FROM material_requests WHERE project_id = p.id) as "totalMaterialCost"
     FROM projects p LEFT JOIN regions r ON r.id = p.region_id
     WHERE p.id = ?
   `).get(projectId);
@@ -238,16 +238,16 @@ router.put('/:id', authenticateToken, requireRole(managementRoles), async (req: 
     reason: `Project ${cleanCode} updated by ${req.user!.fullName}`
   });
   const project = await db.prepare(`
-    SELECT p.id, p.project_code as projectCode, p.name, p.network_type as networkType,
-           p.client, p.region_id as regionId, r.name as regionName, p.status, p.budget,
-           p.contract_start_date as contractStartDate, p.contract_end_date as contractEndDate,
-           p.created_at as createdAt, p.updated_at as updatedAt,
-           (SELECT count(*) FROM teams WHERE project_id = p.id) as teamCount,
+    SELECT p.id, p.project_code as "projectCode", p.name, p.network_type as "networkType",
+           p.client, p.region_id as "regionId", r.name as "regionName", p.status, p.budget,
+           p.contract_start_date as "contractStartDate", p.contract_end_date as "contractEndDate",
+           p.created_at as "createdAt", p.updated_at as "updatedAt",
+           (SELECT count(*) FROM teams WHERE project_id = p.id) as "teamCount",
            (SELECT count(DISTINCT up.user_id) FROM user_projects up
             JOIN users u ON u.id = up.user_id AND u.is_active = 1
-            WHERE up.project_id = p.id) as staffCount,
-           (SELECT count(*) FROM material_requests WHERE project_id = p.id) as requestCount,
-           (SELECT COALESCE(sum(estimated_cost), 0) FROM material_requests WHERE project_id = p.id) as totalMaterialCost
+            WHERE up.project_id = p.id) as "staffCount",
+           (SELECT count(*) FROM material_requests WHERE project_id = p.id) as "requestCount",
+           (SELECT COALESCE(sum(estimated_cost), 0) FROM material_requests WHERE project_id = p.id) as "totalMaterialCost"
     FROM projects p LEFT JOIN regions r ON r.id = p.region_id WHERE p.id = ?
   `).get(projectId);
   return res.json({ success: true, message: 'Project updated successfully.', project: decorateProject(project) });
@@ -313,9 +313,9 @@ router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res: Respon
   const projectId = req.params.id;
 
   const project = await db.prepare(`
-    SELECT id, project_code as projectCode, name, network_type as networkType, client,
-           region_id as regionId, status, budget, contract_start_date as contractStartDate,
-           contract_end_date as contractEndDate, created_at as createdAt, updated_at as updatedAt
+    SELECT id, project_code as "projectCode", name, network_type as "networkType", client,
+           region_id as "regionId", status, budget, contract_start_date as "contractStartDate",
+           contract_end_date as "contractEndDate", created_at as "createdAt", updated_at as "updatedAt"
     FROM projects
     WHERE id = ?
   `).get(projectId) as any;
@@ -323,7 +323,7 @@ router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res: Respon
 
   // Material requests breakdown
   const statusBreakdown = await db.prepare(`
-    SELECT status, count(*) as count, sum(estimated_cost) as totalCost
+    SELECT status, count(*) as "count", sum(estimated_cost) as "totalCost"
     FROM material_requests
     WHERE project_id = ?
     GROUP BY status
@@ -331,7 +331,7 @@ router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res: Respon
 
   // Top consumed materials on this project
   const topMaterials = await db.prepare(`
-    SELECT m.name as materialName, m.unit, sum(mii.quantity_issued) as totalQuantityIssued
+    SELECT m.name as "materialName", m.unit, sum(mii.quantity_issued) as "totalQuantityIssued"
     FROM material_issue_items mii
     JOIN material_issues mi ON mii.issue_id = mi.id
     JOIN material_requests mr ON mi.request_id = mr.id

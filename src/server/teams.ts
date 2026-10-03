@@ -52,12 +52,12 @@ async function validateTeamProject(projectId: unknown, teamCode: string): Promis
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const teamScope = isFieldRole(req) ? 'WHERE t.id = ?' : '';
   const teams = await db.prepare(`
-    SELECT t.id, t.team_code as teamCode, t.name, t.leader_id as leaderId,
-           u.full_name as leaderName, u.phone_number as leaderPhone,
-           u.email as leaderEmail, u.employee_id as leaderEmployeeId,
-           t.project_id as projectId, p.name as projectName,
-           t.region_id as regionId, r.name as regionName,
-           t.assigned_area as assignedArea, t.status, t.contact_info as contactInfo,
+    SELECT t.id, t.team_code as "teamCode", t.name, t.leader_id as "leaderId",
+           u.full_name as "leaderName", u.phone_number as "leaderPhone",
+           u.email as "leaderEmail", u.employee_id as "leaderEmployeeId",
+           t.project_id as "projectId", p.name as "projectName",
+           t.region_id as "regionId", r.name as "regionName",
+           t.assigned_area as "assignedArea", t.status, t.contact_info as "contactInfo",
            (
              (SELECT count(*) FROM team_members WHERE team_id = t.id AND is_active = 1) +
              (SELECT count(*) FROM users
@@ -68,7 +68,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
                     AND team_members.employee_id = users.employee_id
                     AND team_members.is_active = 1
                 ))
-           ) as memberCount
+           ) as "memberCount"
     FROM teams t
     LEFT JOIN users u ON t.leader_id = u.id
     LEFT JOIN projects p ON t.project_id = p.id
@@ -79,16 +79,16 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
   // Attach team members to each team
   const getMembers = db.prepare(`
-    SELECT id, team_id as teamId, full_name as fullName, phone_number as phoneNumber,
-           employee_id as employeeId, role_title as roleTitle, national_id as nationalId,
-           is_active as isActive, joined_at as joinedAt, created_at as createdAt,
+    SELECT id, team_id as "teamId", full_name as "fullName", phone_number as "phoneNumber",
+           employee_id as "employeeId", role_title as "roleTitle", national_id as "nationalId",
+           is_active as "isActive", joined_at as "joinedAt", created_at as "createdAt",
            EXISTS (
              SELECT 1 FROM users
              WHERE users.team_id = team_members.team_id
                AND users.employee_id = team_members.employee_id
                AND users.role = 'FIELD_TECHNICIAN'
                AND users.is_active = 1
-           ) as hasLogin
+           ) as "hasLogin"
     FROM team_members
     WHERE team_id = ? AND is_active = 1
     ORDER BY full_name ASC
@@ -97,10 +97,10 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   for (const team of teams) {
     const roster = await getMembers.all(team.id);
     const technicians = await db.prepare(`
-      SELECT 'usrmember-' || id as id, team_id as teamId, full_name as fullName,
-             phone_number as phoneNumber, employee_id as employeeId,
-             'Field Technician' as roleTitle, NULL as nationalId,
-             is_active as isActive, created_at as joinedAt, created_at as createdAt
+      SELECT 'usrmember-' || id as id, team_id as "teamId", full_name as "fullName",
+             phone_number as "phoneNumber", employee_id as "employeeId",
+             'Field Technician' as "roleTitle", NULL as "nationalId",
+             is_active as "isActive", created_at as "joinedAt", created_at as "createdAt"
       FROM users
       WHERE team_id = ? AND role = 'FIELD_TECHNICIAN' AND is_active = 1
         AND NOT EXISTS (
@@ -120,9 +120,9 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 // GET /api/v1/teams/leaders/available (Get registered Field Team Leaders)
 router.get('/leaders/available', authenticateToken, requireRole(managementRoles), async (req: AuthRequest, res: Response) => {
   const leaders = await db.prepare(`
-    SELECT u.id, u.full_name as fullName, u.email, u.employee_id as employeeId,
-           u.phone_number as phoneNumber, u.department, u.team_id as teamId,
-           t.team_code as currentTeamCode, t.name as currentTeamName
+    SELECT u.id, u.full_name as "fullName", u.email, u.employee_id as "employeeId",
+           u.phone_number as "phoneNumber", u.department, u.team_id as "teamId",
+           t.team_code as "currentTeamCode", t.name as "currentTeamName"
     FROM users u
     LEFT JOIN teams t ON u.team_id = t.id
     WHERE u.role = 'FIELD_TEAM_LEADER' AND u.is_active = 1
@@ -210,10 +210,10 @@ router.post('/', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMIN', 'HR', '
   });
 
   const createdTeam = await db.prepare(`
-    SELECT t.id, t.team_code as teamCode, t.name, t.leader_id as leaderId,
-           u.full_name as leaderName, u.phone_number as leaderPhone,
-           t.project_id as projectId, t.region_id as regionId,
-           t.assigned_area as assignedArea, t.status, t.contact_info as contactInfo
+    SELECT t.id, t.team_code as "teamCode", t.name, t.leader_id as "leaderId",
+           u.full_name as "leaderName", u.phone_number as "leaderPhone",
+           t.project_id as "projectId", t.region_id as "regionId",
+           t.assigned_area as "assignedArea", t.status, t.contact_info as "contactInfo"
     FROM teams t
     LEFT JOIN users u ON t.leader_id = u.id
     WHERE t.id = ?
@@ -317,25 +317,25 @@ router.get('/:id/members', authenticateToken, async (req: AuthRequest, res: Resp
   const teamId = req.params.id;
   if (!requireTeamAccess(req, res, teamId)) return;
   const members = await db.prepare(`
-    SELECT id, team_id as teamId, full_name as fullName, phone_number as phoneNumber,
-           employee_id as employeeId, role_title as roleTitle, national_id as nationalId,
-           is_active as isActive, joined_at as joinedAt, created_at as createdAt,
+    SELECT id, team_id as "teamId", full_name as "fullName", phone_number as "phoneNumber",
+           employee_id as "employeeId", role_title as "roleTitle", national_id as "nationalId",
+           is_active as "isActive", joined_at as "joinedAt", created_at as "createdAt",
            EXISTS (
              SELECT 1 FROM users
              WHERE users.team_id = team_members.team_id
                AND users.employee_id = team_members.employee_id
                AND users.role = 'FIELD_TECHNICIAN'
                AND users.is_active = 1
-           ) as hasLogin
+           ) as "hasLogin"
     FROM team_members
     WHERE team_id = ? AND is_active = 1
     ORDER BY full_name ASC
   `).all(teamId) as any[];
   const technicians = await db.prepare(`
-    SELECT 'usrmember-' || id as id, team_id as teamId, full_name as fullName,
-           phone_number as phoneNumber, employee_id as employeeId,
-           'Field Technician' as roleTitle, NULL as nationalId,
-           is_active as isActive, created_at as joinedAt, created_at as createdAt
+    SELECT 'usrmember-' || id as id, team_id as "teamId", full_name as "fullName",
+           phone_number as "phoneNumber", employee_id as "employeeId",
+           'Field Technician' as "roleTitle", NULL as "nationalId",
+           is_active as "isActive", created_at as "joinedAt", created_at as "createdAt"
     FROM users
     WHERE team_id = ? AND role = 'FIELD_TECHNICIAN' AND is_active = 1
       AND NOT EXISTS (
@@ -397,9 +397,9 @@ router.post('/:id/members', authenticateToken, requireRole(['SUPER_ADMIN', 'ADMI
   });
 
   const member = await db.prepare(`
-    SELECT id, team_id as teamId, full_name as fullName, phone_number as phoneNumber,
-           employee_id as employeeId, role_title as roleTitle, national_id as nationalId,
-           is_active as isActive, joined_at as joinedAt, created_at as createdAt
+    SELECT id, team_id as "teamId", full_name as "fullName", phone_number as "phoneNumber",
+           employee_id as "employeeId", role_title as "roleTitle", national_id as "nationalId",
+           is_active as "isActive", joined_at as "joinedAt", created_at as "createdAt"
     FROM team_members
     WHERE id = ?
   `).get(memberId);
@@ -487,13 +487,13 @@ router.get('/:id/stock', authenticateToken, async (req: AuthRequest, res: Respon
   if (!requireTeamAccess(req, res, teamId)) return;
 
   const stocks = await db.prepare(`
-    SELECT ts.id, ts.team_id as teamId, ts.material_id as materialId,
-           m.sku, m.name as materialName, m.category, m.unit,
-           ts.current_stock as currentStock, ts.total_issued as totalIssued,
-           ts.total_consumed as totalConsumed, ts.total_returned as totalReturned,
-           ts.total_damaged as totalDamaged, ts.total_lost as totalLost,
-           m.is_serial_required as isSerialRequired,
-           ts.updated_at as updatedAt
+    SELECT ts.id, ts.team_id as "teamId", ts.material_id as "materialId",
+           m.sku, m.name as "materialName", m.category, m.unit,
+           ts.current_stock as "currentStock", ts.total_issued as "totalIssued",
+           ts.total_consumed as "totalConsumed", ts.total_returned as "totalReturned",
+           ts.total_damaged as "totalDamaged", ts.total_lost as "totalLost",
+           m.is_serial_required as "isSerialRequired",
+           ts.updated_at as "updatedAt"
     FROM team_stocks ts
     JOIN materials m ON ts.material_id = m.id
     WHERE ts.team_id = ?
@@ -502,9 +502,9 @@ router.get('/:id/stock', authenticateToken, async (req: AuthRequest, res: Respon
 
   // Active tracked tools currently in custody of this team
   const tools = await db.prepare(`
-    SELECT tu.id, tu.serial_number as serialNumber, tu.barcode, tu.material_id as materialId,
-           m.name as materialName, m.sku, tu.status, tu.custodian_name as custodianName,
-           tu.safaricom_tag as safaricomTag, tu.updated_at as updatedAt
+    SELECT tu.id, tu.serial_number as "serialNumber", tu.barcode, tu.material_id as "materialId",
+           m.name as "materialName", m.sku, tu.status, tu.custodian_name as "custodianName",
+           tu.safaricom_tag as "safaricomTag", tu.updated_at as "updatedAt"
     FROM tracked_units tu
     JOIN materials m ON tu.material_id = m.id
     WHERE tu.current_team_id = ? AND tu.status = 'WITH_TEAM'

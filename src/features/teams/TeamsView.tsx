@@ -361,13 +361,13 @@ export const TeamsView: React.FC = () => {
     setShowCreateProjectModal(true);
   };
 
-  const activeContractProjects = projects.filter((project) =>
-    ['IN_PROGRESS', 'ACTIVE'].includes(project.status) &&
-    project.contractStartDate &&
-    project.contractEndDate &&
-    project.contractStartDate <= new Date().toISOString().slice(0, 10) &&
-    project.contractEndDate >= new Date().toISOString().slice(0, 10)
-  );
+  const hasCurrentContract = (project: Project) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return ['IN_PROGRESS', 'ACTIVE'].includes(project.status) &&
+      Boolean(project.contractStartDate && project.contractEndDate &&
+        project.contractStartDate <= today && project.contractEndDate >= today);
+  };
+  const activeContractProjects = projects.filter(hasCurrentContract);
 
   const openCreateTeamForTechnician = (project: Project) => {
     setReturnToTechnicianAfterTeamCreate(true);
@@ -581,7 +581,7 @@ export const TeamsView: React.FC = () => {
     FTTB: teams.filter((team) => getTeamType(team) === 'FTTB').length,
     OTHER: teams.filter((team) => getTeamType(team) === 'OTHER').length
   };
-  const hasActiveProject = projects.some((project) => ['IN_PROGRESS', 'ACTIVE'].includes(project.status));
+  const hasActiveProject = activeContractProjects.length > 0;
   return (
     <div className="space-y-6">
       {/* Header & Manager Actions */}
@@ -626,7 +626,7 @@ export const TeamsView: React.FC = () => {
       {/* Feedback Banner */}
       {feedback && (
         <div
-          className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-xs font-semibold animate-in fade-in ${
+          className={`fixed right-4 top-4 z-[100] flex max-w-lg items-center gap-2.5 rounded-xl border p-3.5 text-xs font-semibold shadow-lg animate-in fade-in ${
             feedback.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : 'bg-red-50 border-red-200 text-red-800'
@@ -837,7 +837,7 @@ export const TeamsView: React.FC = () => {
                 setNewTeamType(selectedType);
                 const eligibleProject = projects.find((project) =>
                   project.networkType === selectedType &&
-                  ['IN_PROGRESS', 'ACTIVE'].includes(project.status)
+                  hasCurrentContract(project)
                 );
                 setNewProjectId(eligibleProject?.id || '');
                 setNewRegionName('');
@@ -1634,7 +1634,7 @@ export const TeamsView: React.FC = () => {
 
       {/* ================= MODAL: CREATE PROJECT ================= */}
       {showCreateProjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
             <div className="p-4 bg-[#04446F] text-white flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-sm">
@@ -1788,7 +1788,7 @@ export const TeamsView: React.FC = () => {
                     onChange={(event) => {
                       const type = event.target.value as 'FTTH' | 'FTTB';
                       setNewTeamType(type);
-                      setNewProjectId(projects.find((project) => project.networkType === type && ['IN_PROGRESS', 'ACTIVE'].includes(project.status))?.id || '');
+                      setNewProjectId(projects.find((project) => project.networkType === type && hasCurrentContract(project))?.id || '');
                     }}
                     disabled={isEditingTeam}
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-bold text-[#04446F]"
@@ -1853,10 +1853,29 @@ export const TeamsView: React.FC = () => {
                     required
                   >
                     <option value="">-- Select an active {newTeamType} project --</option>
-                    {projects.filter((project) => project.networkType === newTeamType && ['IN_PROGRESS', 'ACTIVE'].includes(project.status)).map((p) => (
-                      <option key={p.id} value={p.id}>{p.projectCode} — {p.name}</option>
-                    ))}
+                    {projects.filter((project) => project.networkType === newTeamType).map((project) => {
+                      const available = hasCurrentContract(project);
+                      const reason = available
+                        ? ''
+                        : project.contractHealth === 'EXPIRED'
+                          ? ' — Contract expired'
+                          : project.contractHealth === 'NOT_STARTED'
+                            ? ' — Contract not started'
+                            : project.contractHealth === 'MISSING_DATES'
+                              ? ' — Contract dates required'
+                              : ` — ${project.status.replace('_', ' ').toLowerCase()}`;
+                      return (
+                        <option key={project.id} value={project.id} disabled={!available}>
+                          {project.projectCode} — {project.name}{reason}
+                        </option>
+                      );
+                    })}
                   </select>
+                  {!projects.some((project) => project.networkType === newTeamType && hasCurrentContract(project)) && (
+                    <p className="mt-1 text-[10px] text-amber-700">
+                      No assignable {newTeamType} project. Projects must have an active status and contract dates that include today. Edit the project above to update its contract.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
